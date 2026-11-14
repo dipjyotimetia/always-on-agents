@@ -396,4 +396,71 @@ describe("always-on architecture acceptance", () => {
     );
     expect(text).toMatch(/provenance:\s*inferred_untrusted/);
   });
+
+  it("serves the optional ops UI and dashboard API", async () => {
+    const server = createIngressServer({
+      db: runtime.db,
+      config: { ...runtime.config, enableUi: true },
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const addr = server.address();
+    if (!addr || typeof addr === "string") throw new Error("no addr");
+    const base = `http://127.0.0.1:${addr.port}`;
+
+    const page = await fetch(`${base}/ui`);
+    expect(page.status).toBe(200);
+    expect(page.headers.get("content-type")).toMatch(/text\/html/);
+    const html = await page.text();
+    expect(html).toContain("always-on");
+    expect(html).toContain("/api/dashboard");
+
+    insertEvent(runtime.db, {
+      source: "ui-test",
+      sourceId: "dash-1",
+      payload: { text: "dashboard" },
+    });
+    const dash = await fetch(`${base}/api/dashboard`);
+    expect(dash.status).toBe(200);
+    const body = (await dash.json()) as {
+      metrics: { events: Record<string, number> };
+      events: Array<{ source_id: string }>;
+    };
+    expect(body.events.some((e) => e.source_id === "dash-1")).toBe(true);
+
+    const stop = await fetch(`${base}/api/control/stop`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        secret: runtime.config.approvalSecret,
+        stop: true,
+      }),
+    });
+    expect(stop.status).toBe(200);
+    expect(existsSync(runtime.config.stopPath)).toBe(true);
+
+    await fetch(`${base}/api/control/stop`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        secret: runtime.config.approvalSecret,
+        stop: false,
+      }),
+    });
+    expect(existsSync(runtime.config.stopPath)).toBe(false);
+
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it("hides UI routes when ENABLE_UI is false", async () => {
+    const server = createIngressServer({
+      db: runtime.db,
+      config: { ...runtime.config, enableUi: false },
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const addr = server.address();
+    if (!addr || typeof addr === "string") throw new Error("no addr");
+    const res = await fetch(`http://127.0.0.1:${addr.port}/ui`);
+    expect(res.status).toBe(404);
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
 });
