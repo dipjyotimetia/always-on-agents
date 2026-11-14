@@ -1,0 +1,116 @@
+import { DatabaseSync } from "node:sqlite";
+
+const SCHEMA = `
+PRAGMA journal_mode = WAL;
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  inbox_id TEXT NOT NULL DEFAULT 'default',
+  source TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  session_key TEXT,
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending','running','done','failed')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  UNIQUE (inbox_id, source, source_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_pending
+  ON events (inbox_id, status, created_at);
+
+CREATE TABLE IF NOT EXISTS timers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  inbox_id TEXT NOT NULL DEFAULT 'default',
+  kind TEXT NOT NULL CHECK (kind IN ('followup','schedule')),
+  due_at TEXT NOT NULL,
+  every_s INTEGER,
+  session_key TEXT,
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active','done','cancelled')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_timers_due
+  ON timers (status, due_at);
+
+CREATE TABLE IF NOT EXISTS outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  inbox_id TEXT NOT NULL DEFAULT 'default',
+  channel TEXT NOT NULL DEFAULT 'log',
+  body TEXT NOT NULL,
+  meta TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending','sent','failed','suppressed')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  sent_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_outbox_pending
+  ON outbox (status, created_at);
+
+CREATE TABLE IF NOT EXISTS leases (
+  inbox_id TEXT PRIMARY KEY,
+  owner TEXT NOT NULL,
+  heartbeat_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS deferred_calls (
+  id TEXT PRIMARY KEY,
+  inbox_id TEXT NOT NULL DEFAULT 'default',
+  session_key TEXT NOT NULL,
+  tool_name TEXT NOT NULL,
+  arguments_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending','approved','denied','expired')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  expires_at TEXT NOT NULL,
+  resolved_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  session_key TEXT PRIMARY KEY,
+  inbox_id TEXT NOT NULL DEFAULT 'default',
+  transcript_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'open'
+    CHECK (status IN ('open','closed')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS run_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  inbox_id TEXT NOT NULL,
+  session_key TEXT,
+  event_ids TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  silence_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS daily_budget (
+  day TEXT NOT NULL,
+  inbox_id TEXT NOT NULL,
+  runs INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, inbox_id)
+);
+`;
+
+export type Db = DatabaseSync;
+
+export function openDb(dbPath: string): Db {
+  const db = new DatabaseSync(dbPath);
+  db.exec(SCHEMA);
+  return db;
+}
+
+export function nowIso(): string {
+  return new Date().toISOString();
+}
