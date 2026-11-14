@@ -1,10 +1,13 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer, type Server } from "node:http";
 import type { Config } from "../config.js";
 import type { Db } from "../db.js";
 import { insertEvent } from "../inbox/store.js";
 import { resolveDeferredCall } from "../permissions/defer.js";
+import { renderDashboardPage } from "../ui/page.js";
+import { getDashboardSnapshot } from "../ui/snapshot.js";
 import { checkRateLimit } from "./ratelimit.js";
 
 export type HandlerDeps = {
@@ -31,6 +34,38 @@ async function handle(
 
     if (req.method === "GET" && url.pathname === "/health") {
       return json(res, 200, { ok: true });
+    }
+
+    if (
+      deps.config.enableUi &&
+      req.method === "GET" &&
+      (url.pathname === "/" || url.pathname === "/ui")
+    ) {
+      return html(res, 200, renderDashboardPage());
+    }
+
+    if (deps.config.enableUi && req.method === "GET" && url.pathname === "/api/dashboard") {
+      return json(res, 200, getDashboardSnapshot(deps.db, deps.config));
+    }
+
+    if (deps.config.enableUi && req.method === "POST" && url.pathname === "/api/control/stop") {
+      const raw = await readRawBody(req, deps.config.maxBodyBytes);
+      const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+      const secret = String(body.secret ?? req.headers["x-approval-secret"] ?? "");
+      if (!secretsEqual(secret, deps.config.approvalSecret)) {
+        return json(res, 401, { error: "invalid approval secret" });
+      }
+      const stop = body.stop !== false && body.stop !== "false";
+      if (stop) {
+        writeFileSync(
+          deps.config.stopPath,
+          `stopped via ui at ${new Date().toISOString()}\n`,
+        );
+      } else if (existsSync(deps.config.stopPath)) {
+        unlinkSync(deps.config.stopPath);
+      }
+      deps.onEvent?.();
+      return json(res, 200, { ok: true, stopped: stop });
     }
 
     if (req.method === "GET" && url.pathname === "/metrics") {
@@ -147,6 +182,15 @@ function json(res: ServerResponse, status: number, body: unknown): void {
     "content-length": Buffer.byteLength(payload),
   });
   res.end(payload);
+}
+
+function html(res: ServerResponse, status: number, body: string): void {
+  res.writeHead(status, {
+    "content-type": "text/html; charset=utf-8",
+    "content-length": Buffer.byteLength(body),
+    "cache-control": "no-store",
+  });
+  res.end(body);
 }
 
 /** HMAC over the raw request body (not re-serialized JSON). */

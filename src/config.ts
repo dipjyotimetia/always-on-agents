@@ -45,6 +45,8 @@ export type Config = {
   eventMaxAttempts: number;
   leaseTtlMs: number;
   autoNotifyBareText: boolean;
+  /** Serve the lightweight ops dashboard at /ui (and /). */
+  enableUi: boolean;
 };
 
 export function loadConfig(overrides: Partial<Config> = {}): Config {
@@ -99,5 +101,6 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     leaseTtlMs: overrides.leaseTtlMs ?? envInt("LEASE_TTL_MS", 30_000),
     autoNotifyBareText:
       overrides.autoNotifyBareText ?? envBool("AUTO_NOTIFY_BARE_TEXT", false),
+    enableUi: overrides.enableUi ?? envBool("ENABLE_UI", true),
   };
 }

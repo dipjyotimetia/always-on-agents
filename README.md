@@ -29,6 +29,10 @@ pnpm start -- serve
 
 Set `ANTHROPIC_API_KEY` to use Claude; otherwise the deterministic mock brain runs offline.
 
+### Ops UI (optional)
+
+With `ENABLE_UI=true` (default), open **http://127.0.0.1:8787/ui** for a zero-dependency dashboard: backlog metrics, pending approvals, ingest, STOP/resume, recent events/runs/outbox/timers. Paste `APPROVAL_SECRET` in the page to approve or toggle STOP. Disable with `ENABLE_UI=false`.
+
 ```bash
 curl -s localhost:8787/events -H 'content-type: application/json' \
   -d '{"source":"webhook","sourceId":"deliv-1","sessionKey":"thread-1","payload":{"text":"hello"}}'

@@ -25,3 +25,4 @@ export { getBacklogMetrics } from "./ops/metrics.js";
 export { listSilences, silenceStats } from "./evals/silence.js";
 export { verifyProgressFile } from "./memory/verify.js";
 export { screenForInjection, wrapUntrusted } from "./agent/injection.js";
+export { getDashboardSnapshot } from "./ui/snapshot.js";
