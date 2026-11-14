@@ -3,16 +3,23 @@ import { loadConfig, type Config } from "./config.js";
 import { openDb, type Db } from "./db.js";
 import { ensureMemoryLayout } from "./memory/store.js";
 import { createMockBrain } from "./agent/mock-brain.js";
+import { createAnthropicBrain } from "./agent/anthropic-brain.js";
 import type { Brain } from "./agent/types.js";
 import { createIngressServer } from "./http/handler.js";
 import { runWorker } from "./worker/worker.js";
 import { runScheduler } from "./timers/scheduler.js";
 import { runDispatcher } from "./outbox/dispatcher.js";
+import { createCredentialStore, type CredentialStore } from "./permissions/proxy.js";
+import { expireDeferredCalls } from "./permissions/defer.js";
+import { WakeBus } from "./worker/wake.js";
+import { addTokensToday } from "./budgets.js";
 
 export type Runtime = {
   config: Config;
   db: Db;
   brain: Brain;
+  credentials: CredentialStore;
+  wake: WakeBus;
   startHttp(): Server;
   runOnce(): Promise<void>;
   startAll(signal?: AbortSignal): Promise<void>;
@@ -22,26 +29,52 @@ export type Runtime = {
 export function createRuntime(opts: {
   config?: Partial<Config>;
   brain?: Brain;
+  credentials?: CredentialStore;
 } = {}): Runtime {
   const config = loadConfig(opts.config ?? {});
   ensureMemoryLayout(config.memoryDir);
   const db = openDb(config.dbPath);
-  const brain = opts.brain ?? createMockBrain();
+  const credentials = opts.credentials ?? createCredentialStore();
+  const wake = new WakeBus();
+
+  const brain =
+    opts.brain ??
+    (config.anthropicApiKey
+      ? createAnthropicBrain({
+          apiKey: config.anthropicApiKey,
+          model: config.anthropicModel,
+          baseUrl: config.anthropicBaseUrl,
+          onUsage: (u) => {
+            addTokensToday(db, "default", u.inputTokens + u.outputTokens);
+          },
+        })
+      : createMockBrain());
 
   return {
     config,
     db,
     brain,
+    credentials,
+    wake,
     startHttp() {
-      return createIngressServer({ db, config });
+      return createIngressServer({
+        db,
+        config,
+        onEvent: () => wake.signal(),
+      });
     },
     async runOnce() {
+      expireDeferredCalls(db);
       await runScheduler({ db, config, once: true });
-      await runWorker({ db, config, brain, once: true });
+      await runWorker({ db, config, brain, credentials, once: true, wake });
       await runDispatcher({ db, config, once: true });
     },
     async startAll(signal) {
-      const server = createIngressServer({ db, config });
+      const server = createIngressServer({
+        db,
+        config,
+        onEvent: () => wake.signal(),
+      });
       await new Promise<void>((resolve) => {
         server.listen(config.port, config.host, () => resolve());
       });
@@ -50,14 +83,23 @@ export function createRuntime(opts: {
           type: "runtime.listening",
           host: config.host,
           port: config.port,
+          brain: config.anthropicApiKey ? "anthropic" : "mock",
         }),
       );
 
+      const sweeper = setInterval(() => {
+        if (signal?.aborted) return;
+        expireDeferredCalls(db);
+      }, Math.max(config.schedulerIntervalMs, 5_000));
+
       await Promise.all([
-        runWorker({ db, config, brain, signal }),
+        runWorker({ db, config, brain, credentials, signal, wake }),
         runScheduler({ db, config, signal }),
         runDispatcher({ db, config, signal }),
-        waitAbort(signal).finally(() => server.close()),
+        waitAbort(signal).finally(() => {
+          clearInterval(sweeper);
+          server.close();
+        }),
       ]);
     },
     close() {

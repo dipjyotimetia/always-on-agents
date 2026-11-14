@@ -1,5 +1,5 @@
 import type { Db } from "../db.js";
-import { nowIso } from "../db.js";
+import { nowIso, withTransaction } from "../db.js";
 import { insertEvent } from "../inbox/store.js";
 
 export type TimerKind = "followup" | "schedule";
@@ -90,8 +90,8 @@ export function createSchedule(
 }
 
 /**
- * Fire due timers into the inbox. Misfire policy for schedules: skip to next
- * slot after now (no backlog storms).
+ * Fire due timers into the inbox inside one IMMEDIATE transaction per timer.
+ * Schedule misfire policy: skip to next slot after now (no backlog storms).
  */
 export function fireDueTimers(db: Db, now = new Date()): number {
   const due = db
@@ -105,35 +105,44 @@ export function fireDueTimers(db: Db, now = new Date()): number {
 
   let fired = 0;
   for (const timer of due) {
-    const sourceId = `${timer.id}:${timer.due_at}`;
-    insertEvent(db, {
-      inboxId: timer.inbox_id,
-      source: "timer",
-      sourceId,
-      sessionKey: timer.session_key,
-      payload: {
-        timerId: timer.id,
-        kind: timer.kind,
-        dueAt: timer.due_at,
-        body: JSON.parse(timer.payload),
-      },
-    });
+    withTransaction(db, () => {
+      // Re-read under lock to avoid double-fire
+      const fresh = db
+        .prepare(`SELECT * FROM timers WHERE id = ?`)
+        .get(timer.id) as TimerRow | undefined;
+      if (!fresh || fresh.status !== "active") return;
+      if (new Date(fresh.due_at).getTime() > now.getTime()) return;
 
-    if (timer.kind === "followup") {
-      db.prepare(
-        `UPDATE timers SET status = 'done', updated_at = ? WHERE id = ?`,
-      ).run(nowIso(), timer.id);
-    } else {
-      const every = timer.every_s ?? 86_400;
-      let next = new Date(timer.due_at).getTime() + every * 1000;
-      while (next <= now.getTime()) {
-        next += every * 1000;
+      const sourceId = `${fresh.id}:${fresh.due_at}`;
+      insertEvent(db, {
+        inboxId: fresh.inbox_id,
+        source: "timer",
+        sourceId,
+        sessionKey: fresh.session_key,
+        payload: {
+          timerId: fresh.id,
+          kind: fresh.kind,
+          dueAt: fresh.due_at,
+          body: JSON.parse(fresh.payload),
+        },
+      });
+
+      if (fresh.kind === "followup") {
+        db.prepare(
+          `UPDATE timers SET status = 'done', updated_at = ? WHERE id = ?`,
+        ).run(nowIso(), fresh.id);
+      } else {
+        const every = fresh.every_s ?? 86_400;
+        let next = new Date(fresh.due_at).getTime() + every * 1000;
+        while (next <= now.getTime()) {
+          next += every * 1000;
+        }
+        db.prepare(
+          `UPDATE timers SET due_at = ?, updated_at = ? WHERE id = ?`,
+        ).run(new Date(next).toISOString(), nowIso(), fresh.id);
       }
-      db.prepare(
-        `UPDATE timers SET due_at = ?, updated_at = ? WHERE id = ?`,
-      ).run(new Date(next).toISOString(), nowIso(), timer.id);
-    }
-    fired += 1;
+      fired += 1;
+    });
   }
   return fired;
 }

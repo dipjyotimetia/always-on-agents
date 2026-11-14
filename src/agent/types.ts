@@ -4,7 +4,9 @@ export type ToolName =
   | "set_followup"
   | "notify_user"
   | "request_approval"
-  | "record_silence";
+  | "record_silence"
+  | "mark_progress_complete"
+  | "proxied_request";
 
 export type ToolCall = {
   id: string;
@@ -30,6 +32,7 @@ export type RunOutcome =
   | { type: "notified"; body: string }
   | { type: "silence"; reason: string }
   | { type: "deferred"; deferredId: string; summary: string }
+  | { type: "executed_approval"; deferredId: string; result: unknown }
   | { type: "error"; error: string };
 
 export type BrainInput = {
@@ -43,4 +46,9 @@ export type BrainOutput =
 
 export type Brain = {
   complete(input: BrainInput): Promise<BrainOutput>;
+};
+
+export type TokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
 };

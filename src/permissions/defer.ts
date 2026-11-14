@@ -8,10 +8,18 @@ export type DeferredCall = {
   session_key: string;
   tool_name: string;
   arguments_json: string;
-  status: "pending" | "approved" | "denied" | "expired";
+  status:
+    | "pending"
+    | "approved"
+    | "denied"
+    | "expired"
+    | "executed"
+    | "failed";
   created_at: string;
   expires_at: string;
   resolved_at: string | null;
+  executed_at: string | null;
+  result_json: string | null;
 };
 
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -51,10 +59,6 @@ export function getDeferredCall(db: Db, id: string): DeferredCall | null {
   );
 }
 
-/**
- * Resolve an approval against the *stored* arguments (never regenerate).
- * Expires stale pending calls.
- */
 export function resolveDeferredCall(
   db: Db,
   opts: { id: string; decision: "approved" | "denied" },
@@ -76,19 +80,71 @@ export function resolveDeferredCall(
   return getDeferredCall(db, opts.id)!;
 }
 
-/** Dangerous-action heuristic classifier (auto mode stand-in). */
+export function markDeferredExecuted(
+  db: Db,
+  id: string,
+  result: unknown,
+): void {
+  db.prepare(
+    `UPDATE deferred_calls
+     SET status = 'executed', executed_at = ?, result_json = ?
+     WHERE id = ?`,
+  ).run(nowIso(), JSON.stringify(result), id);
+}
+
+export function markDeferredFailed(db: Db, id: string, error: string): void {
+  db.prepare(
+    `UPDATE deferred_calls
+     SET status = 'failed', executed_at = ?, result_json = ?
+     WHERE id = ?`,
+  ).run(nowIso(), JSON.stringify({ error }), id);
+}
+
+/** Expire pending deferred calls past expires_at. */
+export function expireDeferredCalls(db: Db): number {
+  const result = db
+    .prepare(
+      `UPDATE deferred_calls
+       SET status = 'expired', resolved_at = ?
+       WHERE status = 'pending' AND expires_at <= ?`,
+    )
+    .run(nowIso(), nowIso());
+  return Number(result.changes);
+}
+
+/** Dangerous-action classifier (auto mode stand-in). */
 export function classifyRisk(
   toolName: string,
   args: Record<string, unknown>,
 ): "allow" | "block" | "defer" {
-  if (toolName === "request_approval" || toolName === "send_external") {
+  if (
+    toolName === "request_approval" ||
+    toolName === "send_external" ||
+    toolName === "proxied_request"
+  ) {
     return "defer";
   }
-  if (toolName === "shell") {
+  if (toolName === "mark_progress_complete") {
+    return "allow";
+  }
+  if (toolName === "shell" || toolName === "bash") {
     const cmd = String(args.command ?? "");
-    if (/\b(rm\s+-rf|mkfs|dd\s+if=|curl\s+[^\n]*\|\s*sh)\b/i.test(cmd)) {
+    if (
+      /\b(rm\s+-rf|mkfs|dd\s+if=|curl\s+[^\n]*\|\s*(ba)?sh|wget\s+[^\n]*\|\s*(ba)?sh|chmod\s+777)\b/i.test(
+        cmd,
+      )
+    ) {
       return "block";
     }
+    if (/\b(curl|wget|nc|ncat|ssh|scp)\b/i.test(cmd)) {
+      return "defer";
+    }
+  }
+  if (toolName === "write_memory") {
+    const prov = String(args.provenance ?? "");
+    const p = String(args.path ?? "");
+    if (p === "instructions.md") return "block";
+    if (prov === "user" && !p.startsWith("notes/preferences")) return "defer";
   }
   return "allow";
 }

@@ -6,6 +6,7 @@ import {
   markOutboxFailed,
   markOutboxSent,
   markOutboxSuppressed,
+  reclaimStaleSending,
 } from "./store.js";
 
 export type DeliverFn = (msg: {
@@ -25,7 +26,6 @@ export async function runDispatcher(opts: {
   const deliver =
     opts.deliver ??
     ((msg) => {
-      // Default: structured stdout delivery (replace with Slack/email adapters)
       console.log(
         JSON.stringify({
           type: "outbox.delivery",
@@ -41,6 +41,7 @@ export async function runDispatcher(opts: {
 
   const tick = async () => {
     if (isStopped(opts.config)) return 0;
+    reclaimStaleSending(opts.db);
     const pending = claimPendingOutbox(opts.db);
     let n = 0;
     for (const row of pending) {

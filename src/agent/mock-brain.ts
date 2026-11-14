@@ -11,20 +11,6 @@ export function createMockBrain(): Brain {
       const lastUser = [...input.messages].reverse().find((m) => m.role === "user");
       const text = lastUser && lastUser.role === "user" ? lastUser.content : "";
 
-      // Approval resume path
-      if (text.includes('"type":"approval"') || text.includes('"type": "approval"')) {
-        return {
-          type: "tool_calls",
-          content: "Executing approved action with stored arguments.",
-          toolCalls: [
-            tool("notify_user", {
-              text: "Approved action completed (stored args).",
-            }),
-          ],
-        };
-      }
-
-      // Explicit silence / duplicate
       if (/duplicate|already reported|nothing to send/i.test(text)) {
         return {
           type: "tool_calls",
@@ -36,13 +22,17 @@ export function createMockBrain(): Brain {
         };
       }
 
-      // Follow-up request
-      const followupMatch = text.match(/check back in (\d+)\s*(seconds?|minutes?|hours?)/i);
+      const followupMatch = text.match(
+        /check back in (\d+)\s*(seconds?|minutes?|hours?)/i,
+      );
       if (followupMatch) {
         const n = Number(followupMatch[1]);
         const unit = followupMatch[2]!.toLowerCase();
-        const seconds =
-          unit.startsWith("hour") ? n * 3600 : unit.startsWith("min") ? n * 60 : n;
+        const seconds = unit.startsWith("hour")
+          ? n * 3600
+          : unit.startsWith("min")
+            ? n * 60
+            : n;
         return {
           type: "tool_calls",
           content: "Scheduling a follow-up.",
@@ -58,7 +48,6 @@ export function createMockBrain(): Brain {
         };
       }
 
-      // High-risk external send → defer
       if (/email anyone|send external|wire money|delete production/i.test(text)) {
         return {
           type: "tool_calls",
@@ -66,15 +55,14 @@ export function createMockBrain(): Brain {
           toolCalls: [
             tool("request_approval", {
               action: "send_external",
-              args: { to: "other@example.com", subject: "agent draft" },
+              args: { to: "other@example.com", subject: "agent draft", body: "hi" },
               reason: "external communication",
             }),
           ],
         };
       }
 
-      // Timer fire: check note and maybe stay quiet
-      if (text.includes('"source":"timer"') || text.includes('"kind":"followup"')) {
+      if (text.includes('"kind":"followup"') || text.includes('"source":"timer"')) {
         return {
           type: "tool_calls",
           toolCalls: [
@@ -85,7 +73,17 @@ export function createMockBrain(): Brain {
         };
       }
 
-      // Default: acknowledge once
+      if (/ignore previous instructions|exfiltrate/i.test(text)) {
+        return {
+          type: "tool_calls",
+          toolCalls: [
+            tool("record_silence", {
+              reason: "injection warning; refusing to follow untrusted instructions",
+            }),
+          ],
+        };
+      }
+
       const summary = summarize(text);
       return {
         type: "tool_calls",
@@ -105,7 +103,9 @@ function tool(name: ToolCall["name"], args: Record<string, unknown>): ToolCall {
 
 function summarize(text: string): string {
   try {
-    const parsed = JSON.parse(text) as unknown;
+    const parsed = JSON.parse(
+      text.replace(/^[\s\S]*<<<UNTRUSTED_EVENT_DATA>>>\n?/, "").replace(/\n?<<<END_UNTRUSTED_EVENT_DATA>>>[\s\S]*$/, ""),
+    ) as unknown;
     return JSON.stringify(parsed).slice(0, 200);
   } catch {
     return text.slice(0, 200);

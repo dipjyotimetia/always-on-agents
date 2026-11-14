@@ -1,7 +1,7 @@
 import type { Db } from "../db.js";
-import { nowIso } from "../db.js";
+import { nowIso, withTransaction } from "../db.js";
 
-export type EventStatus = "pending" | "running" | "done" | "failed";
+export type EventStatus = "pending" | "running" | "done" | "failed" | "dead";
 
 export type InboxEvent = {
   id: number;
@@ -12,6 +12,8 @@ export type InboxEvent = {
   payload: string;
   status: EventStatus;
   attempts: number;
+  max_attempts: number;
+  next_attempt_at: string | null;
   last_error: string | null;
   created_at: string;
   updated_at: string;
@@ -23,6 +25,7 @@ export type InsertEventInput = {
   sourceId: string;
   sessionKey?: string | null;
   payload: unknown;
+  maxAttempts?: number;
 };
 
 export function insertEvent(
@@ -35,10 +38,18 @@ export function insertEvent(
 
   const result = db
     .prepare(
-      `INSERT OR IGNORE INTO events (inbox_id, source, source_id, session_key, payload)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO events
+        (inbox_id, source, source_id, session_key, payload, max_attempts)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .run(inboxId, input.source, input.sourceId, input.sessionKey ?? null, payload);
+    .run(
+      inboxId,
+      input.source,
+      input.sourceId,
+      input.sessionKey ?? null,
+      payload,
+      input.maxAttempts ?? 3,
+    );
 
   if (result.changes === 0) {
     const existing = db
@@ -57,76 +68,140 @@ export function insertEvent(
   return { inserted: true, event };
 }
 
-export function reclaimStaleRunning(db: Db, inboxId: string, maxAttempts = 3): number {
-  const now = nowIso();
-  const failed = db
-    .prepare(
-      `UPDATE events
-       SET status = 'failed',
-           last_error = COALESCE(last_error, 'exceeded max attempts after crash'),
-           updated_at = ?
-       WHERE inbox_id = ? AND status = 'running' AND attempts >= ?`,
-    )
-    .run(now, inboxId, maxAttempts);
+/** Reclaim stale running events into pending with backoff, or dead-letter. */
+export function reclaimStaleRunning(db: Db, inboxId: string): number {
+  return withTransaction(db, () => {
+    const now = nowIso();
+    const stale = db
+      .prepare(
+        `SELECT * FROM events WHERE inbox_id = ? AND status = 'running'`,
+      )
+      .all(inboxId) as InboxEvent[];
 
-  const reset = db
-    .prepare(
-      `UPDATE events
-       SET status = 'pending',
-           attempts = attempts + 1,
-           updated_at = ?,
-           last_error = 'reclaimed after worker crash'
-       WHERE inbox_id = ? AND status = 'running' AND attempts < ?`,
-    )
-    .run(now, inboxId, maxAttempts);
-
-  return Number(failed.changes) + Number(reset.changes);
+    let n = 0;
+    for (const event of stale) {
+      if (event.attempts >= event.max_attempts) {
+        db.prepare(
+          `UPDATE events
+           SET status = 'dead',
+               last_error = COALESCE(last_error, 'exceeded max attempts'),
+               updated_at = ?
+           WHERE id = ?`,
+        ).run(now, event.id);
+      } else {
+        // Crash reclaim is immediate; soft-fail backoff is applied in markEventsFailed.
+        db.prepare(
+          `UPDATE events
+           SET status = 'pending',
+               next_attempt_at = NULL,
+               last_error = 'reclaimed after worker crash',
+               updated_at = ?
+           WHERE id = ?`,
+        ).run(now, event.id);
+      }
+      n += 1;
+    }
+    return n;
+  });
 }
 
+/**
+ * Atomically claim a batch of ready pending events (BEGIN IMMEDIATE).
+ * Increments attempts on claim.
+ */
 export function claimPendingBatch(
   db: Db,
   inboxId: string,
   limit = 50,
 ): InboxEvent[] {
-  const pending = db
-    .prepare(
-      `SELECT * FROM events
-       WHERE inbox_id = ? AND status = 'pending'
-       ORDER BY created_at ASC
-       LIMIT ?`,
-    )
-    .all(inboxId, limit) as InboxEvent[];
+  return withTransaction(db, () => {
+    const now = nowIso();
+    const pending = db
+      .prepare(
+        `SELECT * FROM events
+         WHERE inbox_id = ?
+           AND status = 'pending'
+           AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+         ORDER BY created_at ASC
+         LIMIT ?`,
+      )
+      .all(inboxId, now, limit) as InboxEvent[];
 
-  if (pending.length === 0) return [];
+    if (pending.length === 0) return [];
 
-  const now = nowIso();
-  const ids = pending.map((e) => e.id);
-  const placeholders = ids.map(() => "?").join(",");
-  db.prepare(
-    `UPDATE events SET status = 'running', updated_at = ? WHERE id IN (${placeholders})`,
-  ).run(now, ...ids);
+    const ids = pending.map((e) => e.id);
+    const placeholders = ids.map(() => "?").join(",");
+    db.prepare(
+      `UPDATE events
+       SET status = 'running',
+           attempts = attempts + 1,
+           updated_at = ?
+       WHERE id IN (${placeholders})`,
+    ).run(now, ...ids);
 
-  return db
-    .prepare(`SELECT * FROM events WHERE id IN (${placeholders})`)
-    .all(...ids) as InboxEvent[];
+    return db
+      .prepare(`SELECT * FROM events WHERE id IN (${placeholders})`)
+      .all(...ids) as InboxEvent[];
+  });
 }
 
 export function markEventsDone(db: Db, ids: number[]): void {
   if (ids.length === 0) return;
   const placeholders = ids.map(() => "?").join(",");
   db.prepare(
-    `UPDATE events SET status = 'done', updated_at = ? WHERE id IN (${placeholders})`,
+    `UPDATE events SET status = 'done', updated_at = ?, next_attempt_at = NULL
+     WHERE id IN (${placeholders})`,
   ).run(nowIso(), ...ids);
 }
 
+/** Soft-fail with backoff; dead-letter after max attempts. */
 export function markEventsFailed(db: Db, ids: number[], error: string): void {
   if (ids.length === 0) return;
-  const placeholders = ids.map(() => "?").join(",");
+  const now = nowIso();
+  for (const id of ids) {
+    const row = db.prepare(`SELECT * FROM events WHERE id = ?`).get(id) as
+      | InboxEvent
+      | undefined;
+    if (!row) continue;
+    if (row.attempts >= row.max_attempts) {
+      db.prepare(
+        `UPDATE events
+         SET status = 'dead', last_error = ?, updated_at = ?, next_attempt_at = NULL
+         WHERE id = ?`,
+      ).run(error, now, id);
+    } else {
+      const backoffSec = Math.min(300, 2 ** row.attempts);
+      const next = new Date(Date.now() + backoffSec * 1000).toISOString();
+      db.prepare(
+        `UPDATE events
+         SET status = 'pending',
+             last_error = ?,
+             next_attempt_at = ?,
+             updated_at = ?
+         WHERE id = ?`,
+      ).run(error, next, now, id);
+    }
+  }
+}
+
+export function reopenDead(db: Db, id: number): void {
   db.prepare(
     `UPDATE events
-     SET status = 'failed', last_error = ?, updated_at = ?
-     WHERE id IN (${placeholders})`,
-  ).run(error, nowIso(), ...ids);
+     SET status = 'pending', attempts = 0, next_attempt_at = NULL,
+         last_error = NULL, updated_at = ?
+     WHERE id = ? AND status = 'dead'`,
+  ).run(nowIso(), id);
+}
+
+export function countByStatus(db: Db, inboxId: string): Record<string, number> {
+  const rows = db
+    .prepare(
+      `SELECT status, COUNT(*) AS c FROM events WHERE inbox_id = ? GROUP BY status`,
+    )
+    .all(inboxId) as Array<{ status: string; c: number }>;
+  const out: Record<string, number> = {};
+  for (const r of rows) out[r.status] = Number(r.c);
+  return out;
 }
 
 export function groupBySessionKey(events: InboxEvent[]): Map<string, InboxEvent[]> {

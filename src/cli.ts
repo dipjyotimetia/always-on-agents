@@ -3,6 +3,8 @@ import { createRuntime } from "./runtime.js";
 import { insertEvent } from "./inbox/store.js";
 import { createFollowup, createSchedule } from "./timers/store.js";
 import { writeFileSync, unlinkSync, existsSync } from "node:fs";
+import { getBacklogMetrics } from "./ops/metrics.js";
+import { listSilences, silenceStats } from "./evals/silence.js";
 
 function usage(): never {
   console.log(`always-on-agents
@@ -15,6 +17,8 @@ Usage:
   always-on schedule <secs>    Create recurring schedule every <secs>
   always-on stop               Create STOP kill switch
   always-on resume             Remove STOP kill switch
+  always-on metrics            Print backlog / STOP / budget metrics
+  always-on silences           Export recent silence outcomes for eval labeling
 
 Env: see .env.example
 `);
@@ -48,6 +52,7 @@ async function main(): Promise<void> {
           sessionKey: body.sessionKey ? String(body.sessionKey) : null,
           payload: body.payload ?? body,
         });
+        runtime.wake.signal();
         console.log(JSON.stringify({ inserted: result.inserted, event: result.event }));
         break;
       }
@@ -80,6 +85,21 @@ async function main(): Promise<void> {
       case "resume":
         if (existsSync(runtime.config.stopPath)) unlinkSync(runtime.config.stopPath);
         console.log(JSON.stringify({ stop: false }));
+        break;
+      case "metrics":
+        console.log(JSON.stringify(getBacklogMetrics(runtime.db, runtime.config), null, 2));
+        break;
+      case "silences":
+        console.log(
+          JSON.stringify(
+            {
+              stats: silenceStats(runtime.db),
+              recent: listSilences(runtime.db, { limit: 20 }),
+            },
+            null,
+            2,
+          ),
+        );
         break;
       default:
         usage();
