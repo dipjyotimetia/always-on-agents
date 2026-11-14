@@ -5,6 +5,7 @@ import type { Config } from "../config.js";
 import type { Db } from "../db.js";
 import { insertEvent } from "../inbox/store.js";
 import { resolveDeferredCall } from "../permissions/defer.js";
+import { checkRateLimit } from "./ratelimit.js";
 
 export type HandlerDeps = {
   db: Db;
@@ -26,20 +27,37 @@ async function handle(
 ): Promise<void> {
   try {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    const client = String(req.socket.remoteAddress ?? "unknown");
 
     if (req.method === "GET" && url.pathname === "/health") {
       return json(res, 200, { ok: true });
     }
 
+    if (req.method === "GET" && url.pathname === "/metrics") {
+      const { getBacklogMetrics } = await import("../ops/metrics.js");
+      return json(res, 200, getBacklogMetrics(deps.db, deps.config));
+    }
+
     if (req.method === "POST" && url.pathname === "/events") {
-      const body = await readJson(req);
+      const rl = checkRateLimit(
+        deps.db,
+        `events:${client}`,
+        deps.config.rateLimitPerMinute,
+      );
+      if (!rl.allowed) return json(res, 429, { error: "rate limit exceeded" });
+
+      const raw = await readRawBody(req, deps.config.maxBodyBytes);
+      if (deps.config.requireWebhookSecret && !deps.config.webhookSecret) {
+        return json(res, 500, { error: "webhook secret not configured" });
+      }
       if (deps.config.webhookSecret) {
         const sig = String(req.headers["x-signature"] ?? "");
-        if (!verifySignature(deps.config.webhookSecret, JSON.stringify(body), sig)) {
+        if (!verifySignature(deps.config.webhookSecret, raw, sig)) {
           return json(res, 401, { error: "invalid signature" });
         }
       }
 
+      const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
       const source = String(body.source ?? "webhook");
       const sourceId = String(body.sourceId ?? body.id ?? "");
       if (!sourceId) return json(res, 400, { error: "sourceId required" });
@@ -50,6 +68,7 @@ async function handle(
         sourceId,
         sessionKey: body.sessionKey ? String(body.sessionKey) : null,
         payload: body.payload ?? body,
+        maxAttempts: deps.config.eventMaxAttempts,
       });
 
       deps.onEvent?.();
@@ -61,7 +80,15 @@ async function handle(
     }
 
     if (req.method === "POST" && url.pathname === "/events/approval") {
-      const body = await readJson(req);
+      const rl = checkRateLimit(
+        deps.db,
+        `approval:${client}`,
+        deps.config.rateLimitPerMinute,
+      );
+      if (!rl.allowed) return json(res, 429, { error: "rate limit exceeded" });
+
+      const raw = await readRawBody(req, deps.config.maxBodyBytes);
+      const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
       const secret = String(body.secret ?? req.headers["x-approval-secret"] ?? "");
       if (!secretsEqual(secret, deps.config.approvalSecret)) {
         return json(res, 401, { error: "invalid approval secret" });
@@ -95,20 +122,22 @@ async function handle(
 
     json(res, 404, { error: "not found" });
   } catch (err) {
-    json(res, 500, {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    const message = err instanceof Error ? err.message : String(err);
+    const status = message.includes("body too large") ? 413 : 500;
+    json(res, status, { error: message });
   }
 }
 
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+async function readRawBody(req: IncomingMessage, maxBytes: number): Promise<string> {
   const chunks: Buffer[] = [];
+  let size = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buf.length;
+    if (size > maxBytes) throw new Error("body too large");
+    chunks.push(buf);
   }
-  const raw = Buffer.concat(chunks).toString("utf8");
-  if (!raw) return {};
-  return JSON.parse(raw) as Record<string, unknown>;
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -120,8 +149,9 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
-function verifySignature(secret: string, body: string, header: string): boolean {
-  const expected = createHmac("sha256", secret).update(body).digest("hex");
+/** HMAC over the raw request body (not re-serialized JSON). */
+function verifySignature(secret: string, rawBody: string, header: string): boolean {
+  const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
   const provided = header.replace(/^sha256=/, "");
   try {
     return timingSafeEqual(Buffer.from(expected), Buffer.from(provided));

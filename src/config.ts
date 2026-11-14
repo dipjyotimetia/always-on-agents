@@ -8,6 +8,12 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function envBool(name: string, fallback: boolean): boolean {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  return ["1", "true", "yes", "on"].includes(raw.toLowerCase());
+}
+
 export type Config = {
   dataDir: string;
   dbPath: string;
@@ -17,18 +23,28 @@ export type Config = {
   host: string;
   port: number;
   webhookSecret: string;
+  requireWebhookSecret: boolean;
   approvalSecret: string;
   anthropicApiKey: string | undefined;
   anthropicModel: string;
+  anthropicBaseUrl: string;
   maxTurnsPerRun: number;
   maxTokensPerRun: number;
   maxWallMsPerRun: number;
   maxRunsPerDay: number;
+  maxTokensPerDay: number;
   schedulerIntervalMs: number;
   dispatcherIntervalMs: number;
   workerIdleMs: number;
   minFollowupSeconds: number;
   maxActiveFollowups: number;
+  maxBodyBytes: number;
+  rateLimitPerMinute: number;
+  sessionMaxMessages: number;
+  sessionKeepRecent: number;
+  eventMaxAttempts: number;
+  leaseTtlMs: number;
+  autoNotifyBareText: boolean;
 };
 
 export function loadConfig(overrides: Partial<Config> = {}): Config {
@@ -46,15 +62,22 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     host: overrides.host ?? process.env.HOST ?? "127.0.0.1",
     port: overrides.port ?? envInt("PORT", 8787),
     webhookSecret: overrides.webhookSecret ?? process.env.WEBHOOK_SECRET ?? "",
+    requireWebhookSecret:
+      overrides.requireWebhookSecret ?? envBool("REQUIRE_WEBHOOK_SECRET", false),
     approvalSecret:
       overrides.approvalSecret ?? process.env.APPROVAL_SECRET ?? "dev-approval-secret",
     anthropicApiKey: overrides.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY,
     anthropicModel:
       overrides.anthropicModel ?? process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5",
+    anthropicBaseUrl:
+      overrides.anthropicBaseUrl ??
+      process.env.ANTHROPIC_BASE_URL ??
+      "https://api.anthropic.com",
     maxTurnsPerRun: overrides.maxTurnsPerRun ?? envInt("MAX_TURNS_PER_RUN", 12),
     maxTokensPerRun: overrides.maxTokensPerRun ?? envInt("MAX_TOKENS_PER_RUN", 8000),
     maxWallMsPerRun: overrides.maxWallMsPerRun ?? envInt("MAX_WALL_MS_PER_RUN", 120_000),
     maxRunsPerDay: overrides.maxRunsPerDay ?? envInt("MAX_RUNS_PER_DAY", 200),
+    maxTokensPerDay: overrides.maxTokensPerDay ?? envInt("MAX_TOKENS_PER_DAY", 500_000),
     schedulerIntervalMs:
       overrides.schedulerIntervalMs ?? envInt("SCHEDULER_INTERVAL_MS", 5_000),
     dispatcherIntervalMs:
@@ -64,5 +87,17 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
       overrides.minFollowupSeconds ?? envInt("MIN_FOLLOWUP_SECONDS", 60),
     maxActiveFollowups:
       overrides.maxActiveFollowups ?? envInt("MAX_ACTIVE_FOLLOWUPS", 20),
+    maxBodyBytes: overrides.maxBodyBytes ?? envInt("MAX_BODY_BYTES", 256_000),
+    rateLimitPerMinute:
+      overrides.rateLimitPerMinute ?? envInt("RATE_LIMIT_PER_MINUTE", 120),
+    sessionMaxMessages:
+      overrides.sessionMaxMessages ?? envInt("SESSION_MAX_MESSAGES", 40),
+    sessionKeepRecent:
+      overrides.sessionKeepRecent ?? envInt("SESSION_KEEP_RECENT", 12),
+    eventMaxAttempts:
+      overrides.eventMaxAttempts ?? envInt("EVENT_MAX_ATTEMPTS", 3),
+    leaseTtlMs: overrides.leaseTtlMs ?? envInt("LEASE_TTL_MS", 30_000),
+    autoNotifyBareText:
+      overrides.autoNotifyBareText ?? envBool("AUTO_NOTIFY_BARE_TEXT", false),
   };
 }
