@@ -1,10 +1,8 @@
 # always-on-agents
 
-Rust reference implementation of Anthropic’s [Building always-on agents](https://claude.com/resources/articles/building-always-on-agents) architecture.
+Reference implementation of Anthropic’s [Building always-on agents](https://claude.com/resources/articles/building-always-on-agents) architecture.
 
 **Always-on is a UX, not a long-lived model process.** Brief **runs** wake from a durable **inbox**, load **memory**, act under **permissions** (with a credential proxy), write the **outbox**, and may set **timers**.
-
-The agent loop is **model-agnostic**: a `Brain` trait with adapters for Anthropic, OpenAI-compatible APIs, Gemini, and a deterministic mock.
 
 ## Primitives
 
@@ -21,26 +19,15 @@ Hardening: crash reclaim, retry/dead-letter, daily run+token budgets, human-only
 ## Quick start
 
 ```bash
-cargo build --release -p always-on
-cargo test -p always-on
+pnpm install
+pnpm test
+pnpm build
 
-cargo run -p always-on -- once
-cargo run -p always-on -- serve
+pnpm start -- once
+pnpm start -- serve
 ```
 
-Without an API key (or with `BRAIN_PROVIDER=mock`), the deterministic mock brain runs offline.
-
-### Model providers
-
-| `BRAIN_PROVIDER` | Keys / notes |
-| --- | --- |
-| `auto` (default) | First of Anthropic → OpenAI → Gemini key; else mock |
-| `mock` | Offline deterministic brain |
-| `anthropic` | `ANTHROPIC_API_KEY` (+ optional `ANTHROPIC_MODEL` / `ANTHROPIC_BASE_URL`) |
-| `openai` | `OPENAI_API_KEY` (+ `OPENAI_BASE_URL` for Azure/Ollama/Groq/etc.) |
-| `gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` |
-
-Shared knobs: `LLM_MODEL`, `LLM_BASE_URL`, `LLM_MAX_TOKENS` (see [`.env.example`](.env.example)).
+Set `ANTHROPIC_API_KEY` to use Claude; otherwise the deterministic mock brain runs offline.
 
 ### Ops UI (optional)
 
@@ -55,21 +42,9 @@ curl -s localhost:8787/events/approval -H 'content-type: application/json' \
   -d '{"secret":"dev-approval-secret","deferredId":"<uuid>","decision":"approved"}'
 
 curl -s localhost:8787/metrics
-cargo run -p always-on -- stop
-cargo run -p always-on -- resume
-cargo run -p always-on -- silences
-```
-
-## CLI
-
-```
-always-on serve              Start HTTP + worker + scheduler + dispatcher
-always-on once               Fire timers, process one worker batch, drain outbox
-always-on ingest <json>      Insert an inbox event
-always-on followup <secs> [note]
-always-on schedule <secs>
-always-on stop | resume
-always-on metrics | silences
+pnpm start -- stop    # kill switch
+pnpm start -- resume
+pnpm start -- silences
 ```
 
 ## Security model
