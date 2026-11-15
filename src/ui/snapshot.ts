@@ -1,3 +1,4 @@
+import { brainLabel } from "../agent/factory.js";
 import type { Config } from "../config.js";
 import type { Db } from "../db.js";
 import { getBacklogMetrics } from "../ops/metrics.js";
@@ -40,8 +41,7 @@ export function getDashboardSnapshot(db: Db, config: Config) {
 
   return {
     at: new Date().toISOString(),
-    brain: config.anthropicApiKey ? "anthropic" : "mock",
-    model: config.anthropicModel,
+    ...brainLabel(config),
     metrics,
     silence: silenceStats(db),
     recentSilences: listSilences(db, { limit: 10 }),
