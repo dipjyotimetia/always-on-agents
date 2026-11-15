@@ -1,11 +1,28 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import type { BrainKind } from "./agent/factory.js";
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function envBrain(): BrainKind {
+  const raw = process.env.BRAIN;
+  if (!raw) return "auto";
+  const value = raw.toLowerCase();
+  if (
+    value === "auto" ||
+    value === "mock" ||
+    value === "anthropic" ||
+    value === "openai" ||
+    value === "gemini"
+  ) {
+    return value;
+  }
+  throw new Error(`Unknown BRAIN value: ${raw}`);
 }
 
 function envBool(name: string, fallback: boolean): boolean {
@@ -25,9 +42,16 @@ export type Config = {
   webhookSecret: string;
   requireWebhookSecret: boolean;
   approvalSecret: string;
+  brain: BrainKind;
   anthropicApiKey: string | undefined;
   anthropicModel: string;
   anthropicBaseUrl: string;
+  openaiApiKey: string | undefined;
+  openaiModel: string;
+  openaiBaseUrl: string;
+  geminiApiKey: string | undefined;
+  geminiModel: string;
+  geminiBaseUrl: string | undefined;
   maxTurnsPerRun: number;
   maxTokensPerRun: number;
   maxWallMsPerRun: number;
@@ -68,6 +92,7 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
       overrides.requireWebhookSecret ?? envBool("REQUIRE_WEBHOOK_SECRET", false),
     approvalSecret:
       overrides.approvalSecret ?? process.env.APPROVAL_SECRET ?? "dev-approval-secret",
+    brain: overrides.brain ?? envBrain(),
     anthropicApiKey: overrides.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY,
     anthropicModel:
       overrides.anthropicModel ?? process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5",
@@ -75,6 +100,19 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
       overrides.anthropicBaseUrl ??
       process.env.ANTHROPIC_BASE_URL ??
       "https://api.anthropic.com",
+    openaiApiKey: overrides.openaiApiKey ?? process.env.OPENAI_API_KEY,
+    openaiModel: overrides.openaiModel ?? process.env.OPENAI_MODEL ?? "gpt-5.5",
+    openaiBaseUrl:
+      overrides.openaiBaseUrl ??
+      process.env.OPENAI_BASE_URL ??
+      "https://api.openai.com/v1",
+    geminiApiKey:
+      overrides.geminiApiKey ??
+      process.env.GEMINI_API_KEY ??
+      process.env.GOOGLE_API_KEY,
+    geminiModel:
+      overrides.geminiModel ?? process.env.GEMINI_MODEL ?? "gemini-3.8-flash",
+    geminiBaseUrl: overrides.geminiBaseUrl ?? process.env.GEMINI_BASE_URL,
     maxTurnsPerRun: overrides.maxTurnsPerRun ?? envInt("MAX_TURNS_PER_RUN", 12),
     maxTokensPerRun: overrides.maxTokensPerRun ?? envInt("MAX_TOKENS_PER_RUN", 8000),
     maxWallMsPerRun: overrides.maxWallMsPerRun ?? envInt("MAX_WALL_MS_PER_RUN", 120_000),
