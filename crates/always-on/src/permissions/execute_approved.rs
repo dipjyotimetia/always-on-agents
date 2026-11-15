@@ -1,14 +1,14 @@
-use anyhow::{bail, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, bail};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
 use crate::config::Config;
 use crate::db::Db;
-use crate::outbox::store::{enqueue_outbox, EnqueueOutboxOpts};
+use crate::outbox::store::{EnqueueOutboxOpts, enqueue_outbox};
 
 use super::defer::{get_deferred_call, mark_deferred_executed, mark_deferred_failed};
-use super::proxy::{proxied_fetch, CredentialStore, ProxiedFetchOptions};
+use super::proxy::{CredentialStore, ProxiedFetchOptions, proxied_fetch};
 
 /// Execute an approved deferred call using the *stored* arguments only.
 /// Never regenerates args from the model.
@@ -65,9 +65,11 @@ pub async fn execute_approved_call(
                             ("subject".to_string(), json!(subject)),
                             (
                                 "credentialLabel".to_string(),
-                                json!(credentials
-                                    .has("external_mail")
-                                    .then(|| credentials.label("external_mail"))),
+                                json!(
+                                    credentials
+                                        .has("external_mail")
+                                        .then(|| credentials.label("external_mail"))
+                                ),
                             ),
                         ])),
                         idempotency_key: Some(&format!("exec:{idem_key}")),
@@ -140,7 +142,8 @@ pub async fn execute_approved_call(
         Ok(r) => Ok(r),
         Err(err) => {
             let message = err.to_string();
-            mark_deferred_failed(db, &row.id, &message)?;
+            // Keep status `approved` so a later retry can execute the stored args.
+            // Expired calls are already marked failed before this arm.
             Ok(ExecuteApprovedResult {
                 ok: false,
                 result: json!({ "error": message }),

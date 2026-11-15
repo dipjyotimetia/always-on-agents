@@ -1,4 +1,4 @@
-use crate::db::{with_conn, Db, OptionalExt};
+use crate::db::{Db, OptionalExt, with_conn};
 
 #[derive(Debug, Clone, Copy)]
 pub struct RateLimitResult {
@@ -50,7 +50,7 @@ pub fn check_rate_limit(db: &Db, bucket: &str, limit_per_minute: u32) -> RateLim
         })
     })
     .unwrap_or(RateLimitResult {
-        allowed: true,
-        remaining: limit_per_minute,
+        allowed: false,
+        remaining: 0,
     })
 }

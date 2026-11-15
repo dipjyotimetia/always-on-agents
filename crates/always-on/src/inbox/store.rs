@@ -1,9 +1,10 @@
 use anyhow::Result;
-use rusqlite::{params, Connection, Row};
+use chrono::{DateTime, Utc};
+use rusqlite::{Connection, Row, params};
 use serde_json::Value;
 use std::collections::HashMap;
 
-use crate::db::{now_iso, with_conn, with_transaction, Db, OptionalExt};
+use crate::db::{Db, OptionalExt, now_iso, with_conn, with_transaction};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventStatus {
@@ -71,8 +72,7 @@ fn row_to_event(row: &Row<'_>) -> rusqlite::Result<InboxEvent> {
     })
 }
 
-const EVENT_COLUMNS: &str =
-    "id, inbox_id, source, source_id, session_key, payload, status, attempts, max_attempts, next_attempt_at, last_error, created_at, updated_at";
+const EVENT_COLUMNS: &str = "id, inbox_id, source, source_id, session_key, payload, status, attempts, max_attempts, next_attempt_at, last_error, created_at, updated_at";
 
 fn fetch_event(
     conn: &Connection,
@@ -143,16 +143,22 @@ pub fn insert_event(db: &Db, input: InsertEventInput<'_>) -> Result<InsertEventR
     })
 }
 
-/// Reclaim stale running events into pending with backoff, or dead-letter.
-pub fn reclaim_stale_running(db: &Db, inbox_id: &str) -> Result<u32> {
+/// Reclaim running events whose `updated_at` is older than `older_than_ms`.
+/// Fresh claims stay owned by the worker that is still heartbeating the lease.
+pub fn reclaim_stale_running(db: &Db, inbox_id: &str, older_than_ms: u64) -> Result<u32> {
     with_transaction(db, |conn| {
         let now = now_iso();
         let sql =
             format!("SELECT {EVENT_COLUMNS} FROM events WHERE inbox_id = ? AND status = 'running'");
         let mut stmt = conn.prepare(&sql)?;
-        let stale: Vec<InboxEvent> = stmt
-            .query_map([inbox_id], row_to_event)?
-            .collect::<Result<_, _>>()?;
+        let mapped = stmt.query_map([inbox_id], row_to_event)?;
+        let mut stale = Vec::new();
+        for row in mapped {
+            let event = row?;
+            if event_is_stale(&event, older_than_ms) {
+                stale.push(event);
+            }
+        }
 
         let mut n = 0u32;
         for event in stale {
@@ -324,6 +330,16 @@ pub fn count_by_status(db: &Db, inbox_id: &str) -> Result<HashMap<String, u32>> 
         }
         Ok(out)
     })
+}
+
+fn event_is_stale(event: &InboxEvent, older_than_ms: u64) -> bool {
+    let Ok(updated) = DateTime::parse_from_rfc3339(&event.updated_at) else {
+        return true;
+    };
+    let age_ms = Utc::now()
+        .signed_duration_since(updated.with_timezone(&Utc))
+        .num_milliseconds();
+    age_ms >= i64::try_from(older_than_ms).unwrap_or(i64::MAX)
 }
 
 pub fn group_by_session_key(events: &[InboxEvent]) -> HashMap<String, Vec<InboxEvent>> {

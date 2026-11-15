@@ -1,7 +1,7 @@
-use super::anthropic::{create_anthropic_brain, AnthropicBrainOptions};
-use super::gemini::{create_gemini_brain, GeminiBrainOptions};
+use super::anthropic::{AnthropicBrainOptions, create_anthropic_brain};
+use super::gemini::{GeminiBrainOptions, create_gemini_brain};
 use super::mock::create_mock_brain;
-use super::openai_compat::{create_openai_brain, OpenAiBrainOptions};
+use super::openai_compat::{OpenAiBrainOptions, create_openai_brain};
 use super::types::{Brain, TokenUsage};
 use crate::config::Config;
 use std::sync::Arc;

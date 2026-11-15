@@ -3,7 +3,7 @@ use chrono::Utc;
 use std::collections::HashMap;
 
 use crate::config::Config;
-use crate::db::{with_conn, Db};
+use crate::db::{Db, with_conn};
 use crate::inbox::store::count_by_status;
 use crate::stop::is_stopped;
 

@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::params;
 use uuid::Uuid;
 
-use crate::db::{now_iso, with_transaction, Db};
+use crate::db::{Db, now_iso, with_transaction};
 
 #[derive(Debug, Clone)]
 pub struct Lease {

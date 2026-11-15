@@ -1,9 +1,9 @@
 use crate::config::Config;
-use crate::db::{with_conn, Db};
+use crate::db::{Db, with_conn};
 use crate::evals::silence::{list_silences, silence_stats};
 use crate::ops::metrics::get_backlog_metrics;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,7 +115,7 @@ fn resolve_brain_display(config: &Config) -> (String, String) {
 
 fn query_rows(conn: &rusqlite::Connection, sql: &str) -> rusqlite::Result<Vec<Value>> {
     let mut stmt = conn.prepare(sql)?;
-    let names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+    let names: Vec<String> = stmt.column_names().map(|s| s.to_string()).collect();
     let mut rows = stmt.query([])?;
     let mut out = Vec::new();
     while let Some(row) = rows.next()? {

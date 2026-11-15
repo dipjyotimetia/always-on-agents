@@ -1,12 +1,12 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use regex::Regex;
-use rusqlite::{params, Row};
+use rusqlite::{Row, params};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use uuid::Uuid;
 
-use crate::db::{now_iso, with_conn, Db, OptionalExt};
+use crate::db::{Db, OptionalExt, now_iso, with_conn};
 
 const DEFAULT_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 

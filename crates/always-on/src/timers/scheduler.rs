@@ -1,6 +1,6 @@
 use anyhow::Result;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::config::Config;
 use crate::db::Db;
@@ -24,10 +24,10 @@ pub async fn run_scheduler(opts: SchedulerOptions) -> Result<u32> {
             return Ok(0u32);
         }
         let n = fire_due_timers(&opts.db, chrono::Utc::now())?;
-        if n > 0 {
-            if let Some(ref cb) = opts.on_fire {
-                cb(n);
-            }
+        if n > 0
+            && let Some(ref cb) = opts.on_fire
+        {
+            cb(n);
         }
         Ok(n)
     };

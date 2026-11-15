@@ -1,18 +1,18 @@
 use always_on::config::ConfigOverrides;
 use always_on::evals::{list_silences, silence_stats};
-use always_on::inbox::store::{insert_event, InsertEventInput};
+use always_on::inbox::store::{InsertEventInput, insert_event};
 use always_on::ops::get_backlog_metrics;
-use always_on::runtime::{create_runtime, CreateRuntimeOptions};
+use always_on::runtime::{CreateRuntimeOptions, create_runtime};
 use always_on::timers::store::{
-    create_followup, create_schedule, CreateFollowupOpts, CreateScheduleOpts,
+    CreateFollowupOpts, CreateScheduleOpts, create_followup, create_schedule,
 };
 use anyhow::Result;
 use chrono::{Duration, Utc};
 use clap::{Parser, Subcommand};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Parser)]
 #[command(name = "always-on", about = "Always-on agents runtime")]

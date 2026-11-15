@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::Utc;
 
-use crate::db::{with_conn, Db};
+use crate::db::{Db, with_conn};
 
 pub fn day_key() -> String {
     Utc::now().format("%Y-%m-%d").to_string()

@@ -1,7 +1,7 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Notify;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 /// In-process wake channel: ingress signals the worker to skip idle sleep.
 #[derive(Debug, Default)]

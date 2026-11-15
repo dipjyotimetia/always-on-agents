@@ -13,6 +13,8 @@ pub enum ToolName {
     RecordSilence,
     MarkProgressComplete,
     ProxiedRequest,
+    /// Model returned a tool name this runtime does not implement.
+    Unknown,
 }
 
 impl ToolName {
@@ -26,6 +28,49 @@ impl ToolName {
             Self::RecordSilence => "record_silence",
             Self::MarkProgressComplete => "mark_progress_complete",
             Self::ProxiedRequest => "proxied_request",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "read_memory" => Some(Self::ReadMemory),
+            "write_memory" => Some(Self::WriteMemory),
+            "set_followup" => Some(Self::SetFollowup),
+            "notify_user" => Some(Self::NotifyUser),
+            "request_approval" => Some(Self::RequestApproval),
+            "record_silence" => Some(Self::RecordSilence),
+            "mark_progress_complete" => Some(Self::MarkProgressComplete),
+            "proxied_request" => Some(Self::ProxiedRequest),
+            _ => None,
+        }
+    }
+}
+
+/// Build a tool call from a provider payload. Unknown names become a failed `Unknown` call
+/// instead of being aliased onto `record_silence`.
+pub fn tool_call_from_model(id: String, raw_name: &str, mut arguments: Value) -> ToolCall {
+    match ToolName::parse(raw_name) {
+        Some(name) => ToolCall {
+            id,
+            name,
+            arguments,
+        },
+        None => {
+            if !arguments.is_object() {
+                arguments = serde_json::json!({});
+            }
+            if let Some(obj) = arguments.as_object_mut() {
+                obj.insert(
+                    "_rejected_name".to_string(),
+                    Value::String(raw_name.to_string()),
+                );
+            }
+            ToolCall {
+                id,
+                name: ToolName::Unknown,
+                arguments,
+            }
         }
     }
 }

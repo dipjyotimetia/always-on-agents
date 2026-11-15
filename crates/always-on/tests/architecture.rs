@@ -5,21 +5,21 @@ use always_on::agent::types::{AgentMessage, Brain, BrainInput, BrainOutput};
 use always_on::agent::{compact_messages, create_mock_brain};
 use always_on::config::ConfigOverrides;
 use always_on::evals::silence::silence_stats;
-use always_on::http::{create_router, HandlerDeps};
-use always_on::inbox::{claim_pending_batch, insert_event, mark_events_failed, InsertEventInput};
+use always_on::http::{HandlerDeps, create_router};
+use always_on::inbox::{InsertEventInput, claim_pending_batch, insert_event, mark_events_failed};
 use always_on::memory::{
-    verify_progress_file, write_memory_file, MemoryProvenance, WriteMemoryOptions,
+    MemoryProvenance, WriteMemoryOptions, verify_progress_file, write_memory_file,
 };
 use always_on::ops::metrics::get_backlog_metrics;
 use always_on::outbox::claim_pending_outbox;
 use always_on::permissions::defer::{get_deferred_call, resolve_deferred_call};
-use always_on::runtime::{create_runtime, CreateRuntimeOptions, Runtime};
-use always_on::timers::{create_followup, fire_due_timers, CreateFollowupOpts};
+use always_on::runtime::{CreateRuntimeOptions, Runtime, create_runtime};
+use always_on::timers::{CreateFollowupOpts, create_followup, fire_due_timers};
 use always_on::worker::{acquire_lease, heartbeat_lease};
 use async_trait::async_trait;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::Sha256;
 use std::fs;
 use std::path::PathBuf;
@@ -128,7 +128,7 @@ async fn reclaims_a_crashed_running_event_and_retries() {
 
     always_on::db::with_conn(&rt.db, |conn| {
         conn.execute(
-            "UPDATE events SET status = 'running', attempts = 1 WHERE id = ?",
+            "UPDATE events SET status = 'running', attempts = 1, updated_at = '2000-01-01T00:00:00.000Z' WHERE id = ?",
             [event.id],
         )?;
         Ok(())
@@ -313,9 +313,11 @@ async fn defers_high_risk_action_and_executes_stored_args_after_approval() {
         Ok(rows)
     })
     .unwrap();
-    assert!(external
-        .iter()
-        .any(|(b, _)| b.contains("other@example.com")));
+    assert!(
+        external
+            .iter()
+            .any(|(b, _)| b.contains("other@example.com"))
+    );
     assert!(external.iter().all(|(_, s)| s == "sent" || s == "pending"));
 
     let outcome: String = always_on::db::with_conn(&rt.db, |conn| {
@@ -663,13 +665,14 @@ async fn serves_the_optional_ops_ui_and_dashboard_api() {
         .await
         .unwrap();
     assert_eq!(page.status(), 200);
-    assert!(page
-        .headers()
-        .get("content-type")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .contains("text/html"));
+    assert!(
+        page.headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("text/html")
+    );
     let html = page.text().await.unwrap();
     assert!(html.contains("always-on"));
     assert!(html.contains("/api/dashboard"));
@@ -682,8 +685,16 @@ async fn serves_the_optional_ops_ui_and_dashboard_api() {
         json!({ "text": "dashboard" }),
         None,
     );
+    let unauth = client
+        .get(format!("http://{addr}/api/dashboard"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unauth.status(), 401);
+
     let dash = client
         .get(format!("http://{addr}/api/dashboard"))
+        .header("x-approval-secret", &rt.config.approval_secret)
         .send()
         .await
         .unwrap();
