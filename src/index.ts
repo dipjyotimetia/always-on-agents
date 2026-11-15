@@ -16,6 +16,9 @@ export {
 } from "./permissions/proxy.js";
 export { createMockBrain } from "./agent/mock-brain.js";
 export { createAnthropicBrain } from "./agent/anthropic-brain.js";
+export { createOpenAiBrain } from "./agent/openai-brain.js";
+export { createGeminiBrain } from "./agent/gemini-brain.js";
+export { createBrain, resolveBrainKind, brainLabel } from "./agent/factory.js";
 export { compactMessages } from "./agent/loop.js";
 export { runWorker } from "./worker/worker.js";
 export { runScheduler } from "./timers/scheduler.js";

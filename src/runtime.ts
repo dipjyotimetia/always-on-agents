@@ -2,8 +2,7 @@ import type { Server } from "node:http";
 import { loadConfig, type Config } from "./config.js";
 import { openDb, type Db } from "./db.js";
 import { ensureMemoryLayout } from "./memory/store.js";
-import { createMockBrain } from "./agent/mock-brain.js";
-import { createAnthropicBrain } from "./agent/anthropic-brain.js";
+import { brainLabel, createBrain } from "./agent/factory.js";
 import type { Brain } from "./agent/types.js";
 import { createIngressServer } from "./http/handler.js";
 import { runWorker } from "./worker/worker.js";
@@ -12,7 +11,6 @@ import { runDispatcher } from "./outbox/dispatcher.js";
 import { createCredentialStore, type CredentialStore } from "./permissions/proxy.js";
 import { expireDeferredCalls } from "./permissions/defer.js";
 import { WakeBus } from "./worker/wake.js";
-import { addTokensToday } from "./budgets.js";
 
 export type Runtime = {
   config: Config;
@@ -37,18 +35,8 @@ export function createRuntime(opts: {
   const credentials = opts.credentials ?? createCredentialStore();
   const wake = new WakeBus();
 
-  const brain =
-    opts.brain ??
-    (config.anthropicApiKey
-      ? createAnthropicBrain({
-          apiKey: config.anthropicApiKey,
-          model: config.anthropicModel,
-          baseUrl: config.anthropicBaseUrl,
-          onUsage: (u) => {
-            addTokensToday(db, "default", u.inputTokens + u.outputTokens);
-          },
-        })
-      : createMockBrain());
+  const brain = opts.brain ?? createBrain(config);
+  const label = brainLabel(config);
 
   return {
     config,
@@ -83,7 +71,8 @@ export function createRuntime(opts: {
           type: "runtime.listening",
           host: config.host,
           port: config.port,
-          brain: config.anthropicApiKey ? "anthropic" : "mock",
+          brain: label.brain,
+          model: label.model,
         }),
       );
 
