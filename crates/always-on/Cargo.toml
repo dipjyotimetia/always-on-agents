@@ -1,0 +1,40 @@
+[package]
+name = "always-on"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Always-on agents runtime (Rust port)"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "always-on"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1.54", features = ["full"] }
+axum = "0.8.9"
+rusqlite = { version = "0.43", features = ["bundled"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hmac = "0.12"
+sha2 = "0.10"
+subtle = "2"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+clap = { version = "4", features = ["derive"] }
+async-trait = "0.1"
+anyhow = "1"
+tower-http = { version = "0.7", features = ["trace", "cors"], optional = true }
+hex = "0.4"
+parking_lot = "0.12"
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+default = []
+tower = ["dep:tower-http"]
