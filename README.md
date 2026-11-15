@@ -27,7 +27,7 @@ pnpm start -- once
 pnpm start -- serve
 ```
 
-Set `ANTHROPIC_API_KEY` to use Claude; otherwise the deterministic mock brain runs offline.
+`BRAIN=auto` (the default) picks a live model in this order: Anthropic when `ANTHROPIC_API_KEY` is set, otherwise OpenAI when `OPENAI_API_KEY` is set, otherwise Gemini when `GEMINI_API_KEY` or `GOOGLE_API_KEY` is set. Calls go through the official SDKs (`@anthropic-ai/sdk`, `openai`, `@google/genai`). Anthropic caches the stable memory prefix (instructions and index) with a prompt-cache breakpoint. With no key, the deterministic mock brain runs offline. `BRAIN=mock|anthropic|openai|gemini` forces one brain and fails at startup if that key is missing.
 
 ### Ops UI (optional)
 

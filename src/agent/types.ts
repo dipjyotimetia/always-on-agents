@@ -35,14 +35,33 @@ export type RunOutcome =
   | { type: "executed_approval"; deferredId: string; result: unknown }
   | { type: "error"; error: string };
 
+/** JSON Schema object passed to official provider SDKs as the tool input schema. */
+export type ToolInputSchema = {
+  type: "object";
+  properties: Record<string, unknown>;
+  required?: string[];
+  additionalProperties?: boolean;
+};
+
+export type ToolDef = {
+  name: ToolName;
+  description: string;
+  inputSchema: ToolInputSchema;
+};
+
 export type BrainInput = {
   messages: AgentMessage[];
-  tools: Array<{ name: ToolName; description: string }>;
+  tools: ToolDef[];
+  /**
+   * Instructions and memory index loaded on every run.
+   * Anthropic caches this block; other providers keep it at the front of the prompt.
+   */
+  cacheableSystemPrefix?: string;
 };
 
 export type BrainOutput =
-  | { type: "message"; content: string }
-  | { type: "tool_calls"; content?: string; toolCalls: ToolCall[] };
+  | { type: "message"; content: string; usage?: TokenUsage }
+  | { type: "tool_calls"; content?: string; toolCalls: ToolCall[]; usage?: TokenUsage };
 
 export type Brain = {
   complete(input: BrainInput): Promise<BrainOutput>;

@@ -13,7 +13,7 @@ import { enqueueOutbox } from "../outbox/store.js";
 import { classifyRisk, createDeferredCall } from "../permissions/defer.js";
 import type { CredentialStore } from "../permissions/proxy.js";
 import { createFollowup } from "../timers/store.js";
-import type { ToolCall, ToolResult } from "./types.js";
+import type { ToolCall, ToolDef, ToolInputSchema, ToolResult } from "./types.js";
 
 export type ToolContext = {
   db: Db;
@@ -23,42 +23,145 @@ export type ToolContext = {
   credentials: CredentialStore;
 };
 
-export const TOOL_DEFS = [
+const idempotencyKey = {
+  type: "string",
+  description: "Optional key so a retried call returns the stored result.",
+};
+
+function objectSchema(
+  properties: Record<string, unknown>,
+  required?: string[],
+): ToolInputSchema {
+  return {
+    type: "object",
+    properties: { ...properties, idempotencyKey },
+    ...(required ? { required } : {}),
+    additionalProperties: false,
+  };
+}
+
+export const TOOL_DEFS: ToolDef[] = [
   {
-    name: "read_memory" as const,
+    name: "read_memory",
     description: "Read a memory file relative to the memory directory.",
+    inputSchema: objectSchema(
+      {
+        path: {
+          type: "string",
+          description: "Path relative to the memory directory, such as notes/preferences.md.",
+        },
+      },
+      ["path"],
+    ),
   },
   {
-    name: "write_memory" as const,
+    name: "write_memory",
     description:
       "Write a memory file (not instructions.md). Set provenance: user|agent|inferred_untrusted|verified.",
+    inputSchema: objectSchema(
+      {
+        path: {
+          type: "string",
+          description: "Path relative to the memory directory.",
+        },
+        content: { type: "string", description: "Full file contents to write." },
+        provenance: {
+          type: "string",
+          enum: ["user", "agent", "inferred_untrusted", "verified"],
+          description: "Where this memory came from.",
+        },
+      },
+      ["path", "content"],
+    ),
   },
   {
-    name: "set_followup" as const,
+    name: "set_followup",
     description: "Schedule a one-shot follow-up that wakes via the inbox.",
+    inputSchema: objectSchema({
+      inSeconds: {
+        type: "number",
+        description: "Seconds from now until the follow-up fires.",
+      },
+      in_seconds: {
+        type: "number",
+        description: "Alias of inSeconds.",
+      },
+      note: { type: "string", description: "Why this follow-up exists." },
+    }),
   },
   {
-    name: "notify_user" as const,
+    name: "notify_user",
     description: "Enqueue a user-visible message through the outbox.",
+    inputSchema: objectSchema(
+      {
+        text: { type: "string", description: "Message the user should see." },
+      },
+      ["text"],
+    ),
   },
   {
-    name: "request_approval" as const,
+    name: "request_approval",
     description:
       "Defer a high-risk action until an authenticated approval event arrives. Stored args are executed later — not regenerated.",
+    inputSchema: objectSchema({
+      action: {
+        type: "string",
+        description: "Tool to run after approval. Defaults to send_external.",
+      },
+      args: {
+        type: "object",
+        description:
+          "Stored arguments. For send_external include to, subject, and body.",
+        additionalProperties: true,
+      },
+      reason: { type: "string", description: "Why approval is required." },
+    }),
   },
   {
-    name: "record_silence" as const,
+    name: "record_silence",
     description: "Explicitly choose not to message the user; records a reason.",
+    inputSchema: objectSchema({
+      reason: { type: "string", description: "Why nothing was sent." },
+    }),
   },
   {
-    name: "mark_progress_complete" as const,
+    name: "mark_progress_complete",
     description:
       "Mark a progress file complete only if the verifier passes (evidence required).",
+    inputSchema: objectSchema(
+      {
+        path: {
+          type: "string",
+          description: "Progress file relative to the memory directory.",
+        },
+      },
+      ["path"],
+    ),
   },
   {
-    name: "proxied_request" as const,
+    name: "proxied_request",
     description:
       "Request an outbound HTTPS call via credential proxy (always deferred for approval).",
+    inputSchema: objectSchema(
+      {
+        url: {
+          type: "string",
+          description: "HTTPS URL. Other schemes are rejected.",
+        },
+        method: { type: "string", description: "HTTP method. Defaults to POST." },
+        credential: {
+          type: "string",
+          description: "Named credential the proxy injects. Defaults to api.",
+        },
+        headers: {
+          type: "object",
+          description: "Extra request headers. Authorization is injected by the proxy.",
+          additionalProperties: { type: "string" },
+        },
+        body: { type: "string", description: "Optional request body." },
+      },
+      ["url"],
+    ),
   },
 ];
 
