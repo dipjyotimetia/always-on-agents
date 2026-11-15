@@ -1,7 +1,9 @@
-use super::types::{AgentMessage, Brain, BrainInput, BrainOutput, TokenUsage, ToolCall, ToolName};
+use super::types::{
+    AgentMessage, Brain, BrainInput, BrainOutput, TokenUsage, tool_call_from_model,
+};
 use async_trait::async_trait;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -154,12 +156,12 @@ impl Brain for GeminiBrain {
                 GeminiPart::Text { .. } => {}
                 GeminiPart::FunctionCall { function_call } => {
                     if let Some(fc) = function_call {
-                        let name = fc.name.as_deref().unwrap_or("record_silence");
-                        tool_calls.push(ToolCall {
-                            id: Uuid::new_v4().to_string(),
-                            name: parse_tool_name(name),
-                            arguments: fc.args.clone().unwrap_or(json!({})),
-                        });
+                        let name = fc.name.as_deref().unwrap_or("");
+                        tool_calls.push(tool_call_from_model(
+                            Uuid::new_v4().to_string(),
+                            name,
+                            fc.args.clone().unwrap_or(json!({})),
+                        ));
                     }
                 }
                 GeminiPart::Other => {}
@@ -183,20 +185,6 @@ impl Brain for GeminiBrain {
             content: texts.join("\n"),
             usage,
         })
-    }
-}
-
-fn parse_tool_name(name: &str) -> ToolName {
-    match name {
-        "read_memory" => ToolName::ReadMemory,
-        "write_memory" => ToolName::WriteMemory,
-        "set_followup" => ToolName::SetFollowup,
-        "notify_user" => ToolName::NotifyUser,
-        "request_approval" => ToolName::RequestApproval,
-        "record_silence" => ToolName::RecordSilence,
-        "mark_progress_complete" => ToolName::MarkProgressComplete,
-        "proxied_request" => ToolName::ProxiedRequest,
-        _ => ToolName::RecordSilence,
     }
 }
 

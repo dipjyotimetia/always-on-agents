@@ -4,6 +4,8 @@ use std::fs;
 use std::path::Path;
 use std::sync::LazyLock;
 
+use super::store::resolve_within;
+
 #[derive(Debug, Clone)]
 pub struct VerifyResult {
     pub ok: bool,
@@ -14,17 +16,15 @@ pub struct VerifyResult {
 /// Requires explicit checklist markers and forbids self-declared done without evidence.
 pub fn verify_progress_file(memory_dir: &Path, rel_path: &str) -> Result<VerifyResult> {
     let mut reasons = Vec::new();
-    let root = memory_dir
-        .canonicalize()
-        .unwrap_or_else(|_| memory_dir.to_path_buf());
-    let full = root.join(rel_path);
-    let full = full.canonicalize().unwrap_or(full);
-    if full != root && !full.starts_with(&root) {
-        return Ok(VerifyResult {
-            ok: false,
-            reasons: vec!["path escapes memory directory".to_string()],
-        });
-    }
+    let full = match resolve_within(memory_dir, rel_path) {
+        Ok(path) => path,
+        Err(_) => {
+            return Ok(VerifyResult {
+                ok: false,
+                reasons: vec!["path escapes memory directory".to_string()],
+            });
+        }
+    };
     if !full.exists() {
         return Ok(VerifyResult {
             ok: false,

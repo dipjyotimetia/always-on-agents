@@ -1,14 +1,14 @@
 use super::injection::wrap_untrusted;
-use super::tools::{execute_tool, ToolContext, TOOL_DEFS};
+use super::tools::{TOOL_DEFS, ToolContext, execute_tool};
 use super::types::{AgentMessage, Brain, BrainOutput, RunOutcome, TokenUsage, ToolCall, ToolName};
 use crate::config::Config;
-use crate::db::{now_iso, Db};
+use crate::db::{Db, now_iso};
 use crate::inbox::store::InboxEvent;
 use crate::memory::store::load_memory_snapshot;
 use crate::permissions::execute_approved::execute_approved_call;
 use crate::permissions::proxy::CredentialStore;
 use rusqlite::params;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -46,54 +46,64 @@ pub async fn run_agent(opts: RunAgentOptions) -> anyhow::Result<RunResult> {
             .or_else(|| payload.get("deferred_id"))
             .and_then(|v| v.as_str());
         if decision == Some("approved") {
-            if let Some(deferred_id) = deferred_id {
-                let exec =
-                    execute_approved_call(&opts.db, &opts.config, &opts.credentials, deferred_id)
-                        .await
-                        .map_err(|e| anyhow::anyhow!(e))?;
-                let outcome = RunOutcome::ExecutedApproval {
-                    deferred_id: deferred_id.to_string(),
-                    result: exec.result,
-                };
-                let transcript = vec![
-                    AgentMessage::System {
-                        content: "Executed approved deferred call with stored arguments.".into(),
+            let Some(deferred_id) = deferred_id else {
+                return finish_early(
+                    &opts,
+                    RunOutcome::Error {
+                        error: "approved event missing deferredId".into(),
                     },
-                    AgentMessage::Assistant {
-                        content: serde_json::to_string(&outcome).unwrap_or_default(),
-                        tool_calls: None,
-                    },
-                ];
-                save_session(
-                    &opts.db,
-                    &opts.inbox_id,
-                    &opts.session_key,
-                    &transcript,
-                    &opts.config,
-                )?;
-                persist_transcript_file(
-                    &opts.config,
-                    &opts.session_key,
-                    &opts.events,
-                    &transcript,
-                    &outcome,
-                )?;
-                log_run(
-                    &opts.db,
-                    &opts.inbox_id,
-                    &opts.session_key,
-                    &opts.events,
-                    &outcome,
                     &usage,
-                )?;
-                let event_ids: Vec<i64> = opts.events.iter().map(|e| e.id).collect();
-                return Ok(RunResult {
-                    outcome,
-                    transcript,
-                    event_ids,
-                    usage,
-                });
+                );
+            };
+            let exec =
+                execute_approved_call(&opts.db, &opts.config, &opts.credentials, deferred_id)
+                    .await?;
+            if !exec.ok {
+                // Leave the deferred call approved and fail the event so the worker retries.
+                anyhow::bail!("approved execution failed: {}", exec.result);
             }
+            let outcome = RunOutcome::ExecutedApproval {
+                deferred_id: deferred_id.to_string(),
+                result: exec.result,
+            };
+            let transcript = vec![
+                AgentMessage::System {
+                    content: "Executed approved deferred call with stored arguments.".into(),
+                },
+                AgentMessage::Assistant {
+                    content: serde_json::to_string(&outcome).unwrap_or_default(),
+                    tool_calls: None,
+                },
+            ];
+            save_session(
+                &opts.db,
+                &opts.inbox_id,
+                &opts.session_key,
+                &transcript,
+                &opts.config,
+            )?;
+            persist_transcript_file(
+                &opts.config,
+                &opts.session_key,
+                &opts.events,
+                &transcript,
+                &outcome,
+            )?;
+            log_run(
+                &opts.db,
+                &opts.inbox_id,
+                &opts.session_key,
+                &opts.events,
+                &outcome,
+                &usage,
+            )?;
+            let event_ids: Vec<i64> = opts.events.iter().map(|e| e.id).collect();
+            return Ok(RunResult {
+                outcome,
+                transcript,
+                event_ids,
+                usage,
+            });
         }
         if decision == Some("denied") {
             let reason = format!("approval denied for {}", deferred_id.unwrap_or("unknown"));
@@ -300,11 +310,11 @@ pub async fn run_agent(opts: RunAgentOptions) -> anyhow::Result<RunResult> {
                             .and_then(|v| v.as_str())
                             .map(String::from);
                     }
-                    if result.deferred == Some(true) {
-                        if let Some(ref id) = result.deferred_id {
-                            deferred_id = Some(id.clone());
-                            deferred_summary = Some(result.content.clone());
-                        }
+                    if result.deferred == Some(true)
+                        && let Some(ref id) = result.deferred_id
+                    {
+                        deferred_id = Some(id.clone());
+                        deferred_summary = Some(result.content.clone());
                     }
                 }
 
@@ -347,6 +357,27 @@ fn apply_usage(
         usage.input_tokens += approx;
         usage.output_tokens += 200;
     }
+}
+
+fn finish_early(
+    opts: &RunAgentOptions,
+    outcome: RunOutcome,
+    usage: &TokenUsage,
+) -> anyhow::Result<RunResult> {
+    log_run(
+        &opts.db,
+        &opts.inbox_id,
+        &opts.session_key,
+        &opts.events,
+        &outcome,
+        usage,
+    )?;
+    Ok(RunResult {
+        outcome,
+        transcript: Vec::new(),
+        event_ids: opts.events.iter().map(|e| e.id).collect(),
+        usage: *usage,
+    })
 }
 
 async fn finish(

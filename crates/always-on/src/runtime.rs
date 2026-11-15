@@ -1,19 +1,18 @@
 use anyhow::Result;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::agent::{create_brain, Brain, CreateBrainOptions, TokenUsage};
-use crate::budgets::add_tokens_today;
-use crate::config::{load_config, Config, ConfigOverrides};
-use crate::db::{open_db, Db};
-use crate::http::{serve_ingress, HandlerDeps};
+use crate::agent::{Brain, CreateBrainOptions, create_brain};
+use crate::config::{Config, ConfigOverrides, load_config};
+use crate::db::{Db, open_db};
+use crate::http::{HandlerDeps, serve_ingress};
 use crate::memory::ensure_memory_layout;
-use crate::outbox::dispatcher::{run_dispatcher, DispatcherOptions};
+use crate::outbox::dispatcher::{DispatcherOptions, run_dispatcher};
 use crate::permissions::defer::expire_deferred_calls;
 use crate::permissions::proxy::CredentialStore;
-use crate::timers::scheduler::{run_scheduler, SchedulerOptions};
+use crate::timers::scheduler::{SchedulerOptions, run_scheduler};
 use crate::worker::wake::WakeBus;
-use crate::worker::worker::{run_worker, WorkerOptions};
+use crate::worker::worker::{WorkerOptions, run_worker};
 
 pub struct Runtime {
     pub config: Config,
@@ -191,17 +190,12 @@ pub fn create_runtime(opts: CreateRuntimeOptions) -> Result<Runtime> {
     let wake = Arc::new(WakeBus::new());
 
     let config_arc = Arc::new(config.clone());
-    let on_usage = Arc::new({
-        let db = db.clone();
-        move |usage: TokenUsage| {
-            let _ = add_tokens_today(&db, "default", usage.input_tokens + usage.output_tokens);
-        }
-    });
-
+    // Daily tokens are recorded once from the run total in the worker.
+    // Provider `on_usage` hooks must not also call `add_tokens_today`.
     let brain = opts.brain.unwrap_or_else(|| {
         create_brain(CreateBrainOptions {
             config: config_arc.clone(),
-            on_usage: Some(on_usage),
+            on_usage: None,
         })
     });
 

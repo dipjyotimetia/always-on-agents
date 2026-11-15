@@ -1,7 +1,9 @@
-use super::types::{AgentMessage, Brain, BrainInput, BrainOutput, TokenUsage, ToolCall, ToolName};
+use super::types::{
+    AgentMessage, Brain, BrainInput, BrainOutput, TokenUsage, tool_call_from_model,
+};
 use async_trait::async_trait;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -154,11 +156,11 @@ impl Brain for OpenAiBrain {
                         let name = c.function.as_ref()?.name.as_deref()?;
                         let args_raw = c.function.as_ref()?.arguments.as_deref().unwrap_or("{}");
                         let arguments: Value = serde_json::from_str(args_raw).unwrap_or(json!({}));
-                        Some(ToolCall {
-                            id: c.id.clone().unwrap_or_else(|| Uuid::new_v4().to_string()),
-                            name: parse_tool_name(name),
+                        Some(tool_call_from_model(
+                            c.id.clone().unwrap_or_else(|| Uuid::new_v4().to_string()),
+                            name,
                             arguments,
-                        })
+                        ))
                     })
                     .collect::<Vec<_>>()
             })
@@ -176,20 +178,6 @@ impl Brain for OpenAiBrain {
             content: message.and_then(|m| m.content.clone()).unwrap_or_default(),
             usage,
         })
-    }
-}
-
-fn parse_tool_name(name: &str) -> ToolName {
-    match name {
-        "read_memory" => ToolName::ReadMemory,
-        "write_memory" => ToolName::WriteMemory,
-        "set_followup" => ToolName::SetFollowup,
-        "notify_user" => ToolName::NotifyUser,
-        "request_approval" => ToolName::RequestApproval,
-        "record_silence" => ToolName::RecordSilence,
-        "mark_progress_complete" => ToolName::MarkProgressComplete,
-        "proxied_request" => ToolName::ProxiedRequest,
-        _ => ToolName::RecordSilence,
     }
 }
 

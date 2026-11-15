@@ -1,9 +1,9 @@
 use anyhow::Result;
-use rusqlite::{params, Connection, Row};
-use serde_json::{json, Value};
+use rusqlite::{Connection, Row, params};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 
-use crate::db::{now_iso, with_conn, with_transaction, Db, OptionalExt};
+use crate::db::{Db, OptionalExt, now_iso, with_conn, with_transaction};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutboxStatus {

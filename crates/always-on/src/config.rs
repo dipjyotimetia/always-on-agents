@@ -135,7 +135,7 @@ pub fn load_config(overrides: ConfigOverrides) -> Result<Config> {
         .port
         .unwrap_or_else(|| env_int("PORT", 8787) as u16);
 
-    Ok(Config {
+    let config = Config {
         data_dir: data_dir.clone(),
         db_path: data_dir.join("runtime.db"),
         memory_dir: data_dir.join("memory"),
@@ -260,7 +260,35 @@ pub fn load_config(overrides: ConfigOverrides) -> Result<Config> {
         enable_ui: overrides
             .enable_ui
             .unwrap_or_else(|| env_bool("ENABLE_UI", true)),
-    })
+    };
+    enforce_bind_policy(&config)?;
+    Ok(config)
+}
+
+fn enforce_bind_policy(config: &Config) -> Result<()> {
+    if is_loopback_host(&config.host) {
+        return Ok(());
+    }
+    if !config.require_webhook_secret || config.webhook_secret.is_empty() {
+        anyhow::bail!(
+            "HOST {} is not loopback; set WEBHOOK_SECRET and REQUIRE_WEBHOOK_SECRET=true",
+            config.host
+        );
+    }
+    if config.approval_secret.is_empty() || config.approval_secret == "dev-approval-secret" {
+        anyhow::bail!(
+            "HOST {} is not loopback; set a non-default APPROVAL_SECRET",
+            config.host
+        );
+    }
+    Ok(())
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    matches!(
+        host.trim().trim_matches(['[', ']']),
+        "127.0.0.1" | "localhost" | "::1"
+    )
 }
 
 impl Config {

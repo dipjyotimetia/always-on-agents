@@ -289,7 +289,17 @@ function table(headers, rows) {
 }
 
 async function load() {
-  const res = await fetch('/api/dashboard');
+  if (!secret()) {
+    document.getElementById('subtitle').textContent = 'Paste the operator secret to load the dashboard';
+    return;
+  }
+  const res = await fetch('/api/dashboard', {
+    headers: { 'x-approval-secret': secret() },
+  });
+  if (res.status === 401) {
+    document.getElementById('subtitle').textContent = 'Operator secret rejected';
+    return;
+  }
   if (!res.ok) throw new Error('dashboard ' + res.status);
   const data = await res.json();
   const m = data.metrics;

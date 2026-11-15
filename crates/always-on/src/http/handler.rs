@@ -7,15 +7,15 @@ use crate::permissions::defer::resolve_deferred_call;
 use crate::ui::page::render_dashboard_page;
 use crate::ui::snapshot::get_dashboard_snapshot;
 use axum::{
+    Json, Router,
     body::Bytes,
     extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
-    Json, Router,
 };
 use hmac::{Hmac, Mac};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::Sha256;
 use std::fs;
 use std::net::SocketAddr;
@@ -60,9 +60,19 @@ async fn ui_page(State(deps): State<Arc<HandlerDeps>>) -> impl IntoResponse {
     Html(render_dashboard_page()).into_response()
 }
 
-async fn api_dashboard(State(deps): State<Arc<HandlerDeps>>) -> impl IntoResponse {
+async fn api_dashboard(
+    State(deps): State<Arc<HandlerDeps>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
     if !deps.config.enable_ui {
         return StatusCode::NOT_FOUND.into_response();
+    }
+    let secret = headers
+        .get("x-approval-secret")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if !secrets_equal(secret, &deps.config.approval_secret) {
+        return json_error(StatusCode::UNAUTHORIZED, "invalid approval secret");
     }
     match get_dashboard_snapshot(&deps.db, deps.config.as_ref()) {
         Ok(snapshot) => Json(snapshot).into_response(),

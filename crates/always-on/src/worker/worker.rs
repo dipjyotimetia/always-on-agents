@@ -1,21 +1,21 @@
 use anyhow::Result;
 use serde_json::Value;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::agent::{run_agent, Brain, RunAgentOptions};
+use crate::agent::{Brain, RunAgentOptions, run_agent};
 use crate::budgets::{add_tokens_today, increment_runs_today, under_daily_budget};
 use crate::config::Config;
 use crate::db::Db;
 use crate::inbox::store::{
-    claim_pending_batch, group_by_session_key, mark_events_done, mark_events_failed,
-    reclaim_stale_running, InboxEvent,
+    InboxEvent, claim_pending_batch, group_by_session_key, mark_events_done, mark_events_failed,
+    reclaim_stale_running,
 };
 use crate::permissions::defer::get_deferred_call;
 use crate::permissions::proxy::CredentialStore;
 use crate::stop::is_stopped;
 
-use super::lease::{acquire_lease, heartbeat_lease, release_lease, Lease};
+use super::lease::{Lease, acquire_lease, heartbeat_lease, release_lease};
 use super::wake::WakeBus;
 
 pub struct WorkerOptions {
@@ -46,7 +46,7 @@ pub async fn run_worker(opts: WorkerOptions) -> Result<WorkerRunResult> {
         ));
     };
 
-    reclaim_stale_running(&opts.db, &inbox_id)?;
+    reclaim_stale_running(&opts.db, &inbox_id, opts.config.lease_ttl_ms)?;
     let mut batches = 0u32;
 
     let result = async {
@@ -107,6 +107,7 @@ async fn process_once(opts: &WorkerOptions, lease: &Lease, inbox_id: &str) -> Re
     }
 
     let groups = group_by_session_key(&pending);
+    let heartbeat = spawn_lease_heartbeat(opts.db.clone(), lease.clone(), opts.config.lease_ttl_ms);
 
     for (session_key, events) in groups {
         let enriched = enrich_approval_events(&opts.db, &events)?;
@@ -131,7 +132,9 @@ async fn process_once(opts: &WorkerOptions, lease: &Lease, inbox_id: &str) -> Re
                     result.usage.input_tokens + result.usage.output_tokens,
                 )?;
                 mark_events_done(&opts.db, &event_ids)?;
-                heartbeat_lease(&opts.db, lease, opts.config.lease_ttl_ms)?;
+                if !heartbeat_lease(&opts.db, lease, opts.config.lease_ttl_ms)? {
+                    return Err(anyhow::anyhow!("lost lease fence"));
+                }
                 let _ = result;
             }
             Err(err) => {
@@ -141,7 +144,45 @@ async fn process_once(opts: &WorkerOptions, lease: &Lease, inbox_id: &str) -> Re
         }
     }
 
+    heartbeat.stop();
     Ok(true)
+}
+
+struct LeaseHeartbeat {
+    stop: Arc<AtomicBool>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl LeaseHeartbeat {
+    fn stop(self) {
+        drop(self);
+    }
+}
+
+impl Drop for LeaseHeartbeat {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        self.task.abort();
+    }
+}
+
+fn spawn_lease_heartbeat(db: Db, lease: Lease, ttl_ms: u64) -> LeaseHeartbeat {
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = stop.clone();
+    let interval = (ttl_ms / 3).max(1_000);
+    let task = tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_millis(interval)).await;
+            if flag.load(Ordering::Relaxed) {
+                break;
+            }
+            match heartbeat_lease(&db, &lease, ttl_ms) {
+                Ok(true) => {}
+                _ => break,
+            }
+        }
+    });
+    LeaseHeartbeat { stop, task }
 }
 
 async fn idle(opts: &WorkerOptions) {

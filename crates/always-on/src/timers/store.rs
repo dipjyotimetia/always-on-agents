@@ -1,10 +1,10 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Row};
+use rusqlite::{Row, params};
 use serde_json::Value;
 
-use crate::db::{now_iso, with_conn, with_transaction, Db};
-use crate::inbox::store::{insert_event, InsertEventInput};
+use crate::db::{Db, now_iso, with_conn, with_transaction};
+use crate::inbox::store::{InsertEventInput, insert_event};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimerKind {

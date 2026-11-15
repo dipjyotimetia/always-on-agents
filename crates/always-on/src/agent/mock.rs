@@ -1,7 +1,7 @@
 use super::types::{AgentMessage, Brain, BrainInput, BrainOutput, ToolCall, ToolName};
 use async_trait::async_trait;
 use regex::Regex;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use uuid::Uuid;
 

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use rusqlite::Row;
 
-use crate::db::{with_conn, Db};
+use crate::db::{Db, with_conn};
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SilenceEvalRow {

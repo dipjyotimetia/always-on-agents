@@ -3,10 +3,10 @@
 pub mod handler;
 pub mod ratelimit;
 
-pub use handler::{create_router, HandlerDeps};
+pub use handler::{HandlerDeps, create_router};
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::net::TcpListener;
 

@@ -8,8 +8,8 @@ pub mod openai_compat;
 pub mod tools;
 pub mod types;
 
-pub use factory::{create_brain, CreateBrainOptions};
+pub use factory::{CreateBrainOptions, create_brain};
 pub use injection::{screen_for_injection, wrap_untrusted};
-pub use loop_agent::{compact_messages, run_agent, RunAgentOptions, RunResult};
+pub use loop_agent::{RunAgentOptions, RunResult, compact_messages, run_agent};
 pub use mock::create_mock_brain;
 pub use types::*;

@@ -1,7 +1,9 @@
-use super::types::{AgentMessage, Brain, BrainInput, BrainOutput, TokenUsage, ToolCall, ToolName};
+use super::types::{
+    AgentMessage, Brain, BrainInput, BrainOutput, TokenUsage, tool_call_from_model,
+};
 use async_trait::async_trait;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -142,12 +144,11 @@ impl Brain for AnthropicBrain {
             match block {
                 AnthropicContentBlock::Text { text } => texts.push(text),
                 AnthropicContentBlock::ToolUse { id, name, input } => {
-                    let tool_name = parse_tool_name(&name);
-                    tool_calls.push(ToolCall {
-                        id: id.unwrap_or_else(|| Uuid::new_v4().to_string()),
-                        name: tool_name,
-                        arguments: input.unwrap_or(json!({})),
-                    });
+                    tool_calls.push(tool_call_from_model(
+                        id.unwrap_or_else(|| Uuid::new_v4().to_string()),
+                        &name,
+                        input.unwrap_or(json!({})),
+                    ));
                 }
             }
         }
@@ -169,20 +170,6 @@ impl Brain for AnthropicBrain {
             content: texts.join("\n"),
             usage,
         })
-    }
-}
-
-fn parse_tool_name(name: &str) -> ToolName {
-    match name {
-        "read_memory" => ToolName::ReadMemory,
-        "write_memory" => ToolName::WriteMemory,
-        "set_followup" => ToolName::SetFollowup,
-        "notify_user" => ToolName::NotifyUser,
-        "request_approval" => ToolName::RequestApproval,
-        "record_silence" => ToolName::RecordSilence,
-        "mark_progress_complete" => ToolName::MarkProgressComplete,
-        "proxied_request" => ToolName::ProxiedRequest,
-        _ => ToolName::RecordSilence,
     }
 }
 

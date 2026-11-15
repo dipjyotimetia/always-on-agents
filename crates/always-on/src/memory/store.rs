@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use regex::Regex;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -221,12 +221,51 @@ pub fn read_provenance(content: &str) -> Option<MemoryProvenance> {
         .and_then(|m| MemoryProvenance::parse(m.as_str()))
 }
 
-fn resolve_safe(root: &Path, rel_path: &str) -> Result<PathBuf> {
-    let resolved = root.join(rel_path);
+pub fn resolve_within(root: &Path, rel_path: &str) -> Result<PathBuf> {
+    if rel_path.contains('\0') {
+        bail!("invalid memory path");
+    }
+    let mut clean = PathBuf::new();
+    for component in Path::new(rel_path).components() {
+        match component {
+            std::path::Component::Normal(part) => clean.push(part),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => {
+                bail!("path escapes memory directory");
+            }
+        }
+    }
+    if clean.as_os_str().is_empty() {
+        bail!("invalid memory path");
+    }
+
     let root_resolved = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let resolved = fs::canonicalize(&resolved).unwrap_or(resolved);
-    if resolved != root_resolved && !resolved.starts_with(&root_resolved) {
+    let joined = root_resolved.join(&clean);
+    if joined.exists() {
+        let canon = fs::canonicalize(&joined)?;
+        ensure_within(&root_resolved, &canon)?;
+        return Ok(canon);
+    }
+    if let Some(parent) = joined.parent()
+        && parent.exists()
+    {
+        let parent_canon = fs::canonicalize(parent)?;
+        ensure_within(&root_resolved, &parent_canon)?;
+        return Ok(parent_canon.join(joined.file_name().unwrap_or_default()));
+    }
+    ensure_within(&root_resolved, &joined)?;
+    Ok(joined)
+}
+
+fn ensure_within(root: &Path, candidate: &Path) -> Result<()> {
+    if candidate != root && !candidate.starts_with(root) {
         bail!("path escapes memory directory");
     }
-    Ok(resolved)
+    Ok(())
+}
+
+fn resolve_safe(root: &Path, rel_path: &str) -> Result<PathBuf> {
+    resolve_within(root, rel_path)
 }

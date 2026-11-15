@@ -2,16 +2,16 @@ use super::types::{ToolCall, ToolDef, ToolName, ToolResult};
 use crate::config::Config;
 use crate::db::Db;
 use crate::memory::store::{
-    already_reported, append_reported, read_memory_file, write_memory_file, MemoryProvenance,
-    WriteMemoryOptions,
+    MemoryProvenance, WriteMemoryOptions, already_reported, append_reported, read_memory_file,
+    write_memory_file,
 };
 use crate::memory::verify::verify_progress_file;
-use crate::outbox::store::{enqueue_outbox, EnqueueOutboxOpts};
-use crate::permissions::defer::{classify_risk, create_deferred_call, CreateDeferredCallOpts};
+use crate::outbox::store::{EnqueueOutboxOpts, enqueue_outbox};
+use crate::permissions::defer::{CreateDeferredCallOpts, classify_risk, create_deferred_call};
 use crate::permissions::proxy::CredentialStore;
-use crate::timers::store::{create_followup, CreateFollowupOpts};
+use crate::timers::store::{CreateFollowupOpts, create_followup};
 use chrono::{Duration, Utc};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -67,12 +67,11 @@ pub fn execute_tool(ctx: &ToolContext, call: &ToolCall) -> ToolResult {
         .and_then(|v| v.as_str())
         .map(String::from);
 
-    if let Some(ref key) = idempotency_key {
-        if let Ok(cached) = lookup_idempotency(&ctx.db, key) {
-            if let Ok(result) = serde_json::from_str::<ToolResult>(&cached) {
-                return result;
-            }
-        }
+    if let Some(ref key) = idempotency_key
+        && let Ok(cached) = lookup_idempotency(&ctx.db, key)
+        && let Ok(result) = serde_json::from_str::<ToolResult>(&cached)
+    {
+        return result;
     }
 
     let result = match execute_tool_inner(ctx, call) {
@@ -80,10 +79,10 @@ pub fn execute_tool(ctx: &ToolContext, call: &ToolCall) -> ToolResult {
         Err(e) => fail(&call.id, &e.to_string()),
     };
 
-    if let Some(ref key) = idempotency_key {
-        if result.ok {
-            let _ = store_idempotency(&ctx.db, key, call.name.as_str(), &result);
-        }
+    if let Some(ref key) = idempotency_key
+        && result.ok
+    {
+        let _ = store_idempotency(&ctx.db, key, call.name.as_str(), &result);
     }
     result
 }
@@ -272,6 +271,15 @@ fn execute_tool_inner(ctx: &ToolContext, call: &ToolCall) -> anyhow::Result<Tool
                 reason
             };
             Ok(ok(&call.id, &format!("silence:{reason}")))
+        }
+        ToolName::Unknown => {
+            let raw = arg_string(&call.arguments, "_rejected_name");
+            let label = if raw.is_empty() {
+                "unknown".to_string()
+            } else {
+                raw
+            };
+            Ok(fail(&call.id, &format!("unknown tool: {label}")))
         }
         ToolName::MarkProgressComplete => {
             let rel = arg_string(&call.arguments, "path");

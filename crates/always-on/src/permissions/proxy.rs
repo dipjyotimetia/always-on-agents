@@ -1,7 +1,8 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use reqwest::Client;
 use std::collections::HashMap;
 use std::env;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::{Arc, RwLock};
 
 /// Credential proxy: tools never see raw secrets.
@@ -20,10 +21,10 @@ impl CredentialStore {
             }
         }
         for (key, value) in env::vars() {
-            if let Some(name) = key.strip_prefix("AOA_SECRET_") {
-                if !value.is_empty() {
-                    secrets.insert(name.to_lowercase(), value);
-                }
+            if let Some(name) = key.strip_prefix("AOA_SECRET_")
+                && !value.is_empty()
+            {
+                secrets.insert(name.to_lowercase(), value);
             }
         }
         Self {
@@ -84,11 +85,14 @@ pub async fn proxied_fetch(
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("credential not configured: {}", opts.credential))?;
 
-    let client = Client::new();
+    let url = validate_proxied_url(opts.url).await?;
+    let client = Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?;
     let method = opts.method.unwrap_or("POST");
     let mut req = client.request(
         reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::POST),
-        opts.url,
+        url,
     );
     for (k, v) in &opts.headers {
         req = req.header(k, v);
@@ -109,6 +113,62 @@ pub async fn proxied_fetch(
         status,
         body: truncated,
     })
+}
+
+async fn validate_proxied_url(raw: &str) -> Result<reqwest::Url> {
+    let url = reqwest::Url::parse(raw).map_err(|e| anyhow::anyhow!("invalid url: {e}"))?;
+    if url.scheme() != "https" {
+        bail!("proxied_request only allows https URLs");
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| anyhow::anyhow!("proxied_request url is missing a host"))?;
+    if host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost") {
+        bail!("proxied_request blocks local hosts");
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_blocked_ip(ip) {
+            bail!("proxied_request blocks non-public addresses");
+        }
+        return Ok(url);
+    }
+    let port = url.port_or_known_default().unwrap_or(443);
+    let host_owned = host.to_string();
+    let addrs = tokio::task::spawn_blocking(move || {
+        (host_owned.as_str(), port)
+            .to_socket_addrs()
+            .map(|iter| iter.collect::<Vec<SocketAddr>>())
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("dns lookup failed"))??;
+    if addrs.is_empty() {
+        bail!("proxied_request host did not resolve");
+    }
+    if addrs.iter().any(|addr| is_blocked_ip(addr.ip())) {
+        bail!("proxied_request blocks non-public addresses");
+    }
+    Ok(url)
+}
+
+fn is_blocked_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_unspecified()
+                || v4.is_multicast()
+                || v4.is_documentation()
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
 }
 
 pub struct ProxiedFetchOptions<'a> {
