@@ -1,6 +1,6 @@
 use anyhow::Result;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crate::config::Config;
 use crate::db::Db;

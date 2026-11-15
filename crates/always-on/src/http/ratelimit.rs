@@ -8,7 +8,7 @@ pub struct RateLimitResult {
 
 /// Fixed-window rate limiter stored in SQLite.
 pub fn check_rate_limit(db: &Db, bucket: &str, limit_per_minute: u32) -> RateLimitResult {
-    let window = (chrono::Utc::now().timestamp_millis() / 60_000) as i64;
+    let window = chrono::Utc::now().timestamp_millis() / 60_000;
     let limit = limit_per_minute as i64;
 
     with_conn(db, |conn| {

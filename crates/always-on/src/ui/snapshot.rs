@@ -68,8 +68,10 @@ pub fn get_dashboard_snapshot(db: &Db, config: &Config) -> Result<DashboardSnaps
         metrics: serde_json::to_value(metrics).unwrap_or(Value::Null),
         silence: serde_json::to_value(silence_stats(db, INBOX).map_err(|e| e.to_string())?)
             .unwrap_or(Value::Null),
-        recent_silences: serde_json::to_value(list_silences(db, 10, None).map_err(|e| e.to_string())?)
-            .unwrap_or(Value::Null),
+        recent_silences: serde_json::to_value(
+            list_silences(db, 10, None).map_err(|e| e.to_string())?,
+        )
+        .unwrap_or(Value::Null),
         events,
         runs,
         deferred,
@@ -131,9 +133,9 @@ fn sqlite_value_to_json(value: rusqlite::types::Value) -> Value {
     match value {
         rusqlite::types::Value::Null => Value::Null,
         rusqlite::types::Value::Integer(i) => json!(i),
-        rusqlite::types::Value::Real(f) => {
-            serde_json::Number::from_f64(f).map(Value::Number).unwrap_or(Value::Null)
-        }
+        rusqlite::types::Value::Real(f) => serde_json::Number::from_f64(f)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
         rusqlite::types::Value::Text(s) => Value::String(s),
         rusqlite::types::Value::Blob(b) => Value::String(String::from_utf8_lossy(&b).into_owned()),
     }

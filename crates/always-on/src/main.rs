@@ -3,7 +3,9 @@ use always_on::evals::{list_silences, silence_stats};
 use always_on::inbox::store::{insert_event, InsertEventInput};
 use always_on::ops::get_backlog_metrics;
 use always_on::runtime::{create_runtime, CreateRuntimeOptions};
-use always_on::timers::store::{create_followup, create_schedule, CreateFollowupOpts, CreateScheduleOpts};
+use always_on::timers::store::{
+    create_followup, create_schedule, CreateFollowupOpts, CreateScheduleOpts,
+};
 use anyhow::Result;
 use chrono::{Duration, Utc};
 use clap::{Parser, Subcommand};
@@ -37,9 +39,7 @@ enum Commands {
         note: Vec<String>,
     },
     /// Create recurring schedule every N seconds
-    Schedule {
-        every: Option<u64>,
-    },
+    Schedule { every: Option<u64> },
     /// Create STOP kill switch
     Stop,
     /// Remove STOP kill switch
@@ -140,11 +140,14 @@ async fn main() -> Result<()> {
                     max_active_followups: runtime.config.max_active_followups,
                 },
             )?;
-            println!("{}", serde_json::to_string(&json!({
-                "id": timer.id,
-                "due_at": timer.due_at,
-                "kind": "followup",
-            }))?);
+            println!(
+                "{}",
+                serde_json::to_string(&json!({
+                    "id": timer.id,
+                    "due_at": timer.due_at,
+                    "kind": "followup",
+                }))?
+            );
         }
         Commands::Schedule { every } => {
             let every = every.unwrap_or(3600);
@@ -170,10 +173,7 @@ async fn main() -> Result<()> {
         }
         Commands::Stop => {
             let stamp = Utc::now().to_rfc3339();
-            fs::write(
-                &runtime.config.stop_path,
-                format!("stopped at {stamp}\n"),
-            )?;
+            fs::write(&runtime.config.stop_path, format!("stopped at {stamp}\n"))?;
             println!(
                 "{}",
                 json!({
@@ -190,18 +190,21 @@ async fn main() -> Result<()> {
         }
         Commands::Metrics => {
             let metrics = get_backlog_metrics(&runtime.db, &runtime.config, "default")?;
-            println!("{}", serde_json::to_string_pretty(&json!({
-                "stopped": metrics.stopped,
-                "stopPath": metrics.stop_path,
-                "events": metrics.events,
-                "outboxPending": metrics.outbox_pending,
-                "outboxSending": metrics.outbox_sending,
-                "deferredPending": metrics.deferred_pending,
-                "deferredExpired": metrics.deferred_expired,
-                "activeFollowups": metrics.active_followups,
-                "runsToday": metrics.runs_today,
-                "tokensToday": metrics.tokens_today,
-            }))?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "stopped": metrics.stopped,
+                    "stopPath": metrics.stop_path,
+                    "events": metrics.events,
+                    "outboxPending": metrics.outbox_pending,
+                    "outboxSending": metrics.outbox_sending,
+                    "deferredPending": metrics.deferred_pending,
+                    "deferredExpired": metrics.deferred_expired,
+                    "activeFollowups": metrics.active_followups,
+                    "runsToday": metrics.runs_today,
+                    "tokensToday": metrics.tokens_today,
+                }))?
+            );
         }
         Commands::Silences => {
             println!(

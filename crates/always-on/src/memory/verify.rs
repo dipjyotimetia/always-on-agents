@@ -37,10 +37,8 @@ pub fn verify_progress_file(memory_dir: &Path, rel_path: &str) -> Result<VerifyR
         LazyLock::new(|| Regex::new(r"(?i)status:\s*complete").unwrap());
     static DONE_MARKER: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)\[x\]\s*done").unwrap());
-    static EVIDENCE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)evidence:").unwrap());
-    static VERIFIED: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)verified:").unwrap());
+    static EVIDENCE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)evidence:").unwrap());
+    static VERIFIED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)verified:").unwrap());
     static TODO_FIXME: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"TODO|FIXME|not tested").unwrap());
     static INFERRED: LazyLock<Regex> =

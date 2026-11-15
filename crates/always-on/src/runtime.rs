@@ -1,6 +1,6 @@
 use anyhow::Result;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crate::agent::{create_brain, Brain, CreateBrainOptions, TokenUsage};
 use crate::budgets::add_tokens_today;
@@ -187,7 +187,7 @@ pub fn create_runtime(opts: CreateRuntimeOptions) -> Result<Runtime> {
             .to_str()
             .expect("db_path must be valid UTF-8"),
     )?;
-    let credentials = opts.credentials.unwrap_or_else(CredentialStore::default);
+    let credentials = opts.credentials.unwrap_or_default();
     let wake = Arc::new(WakeBus::new());
 
     let config_arc = Arc::new(config.clone());

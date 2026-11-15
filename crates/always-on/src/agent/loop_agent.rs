@@ -1,8 +1,6 @@
 use super::injection::wrap_untrusted;
 use super::tools::{execute_tool, ToolContext, TOOL_DEFS};
-use super::types::{
-    AgentMessage, Brain, BrainOutput, RunOutcome, TokenUsage, ToolCall, ToolName,
-};
+use super::types::{AgentMessage, Brain, BrainOutput, RunOutcome, TokenUsage, ToolCall, ToolName};
 use crate::config::Config;
 use crate::db::{now_iso, Db};
 use crate::inbox::store::InboxEvent;
@@ -49,14 +47,10 @@ pub async fn run_agent(opts: RunAgentOptions) -> anyhow::Result<RunResult> {
             .and_then(|v| v.as_str());
         if decision == Some("approved") {
             if let Some(deferred_id) = deferred_id {
-                let exec = execute_approved_call(
-                    &opts.db,
-                    &opts.config,
-                    &opts.credentials,
-                    deferred_id,
-                )
-                .await
-                .map_err(|e| anyhow::anyhow!(e))?;
+                let exec =
+                    execute_approved_call(&opts.db, &opts.config, &opts.credentials, deferred_id)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e))?;
                 let outcome = RunOutcome::ExecutedApproval {
                     deferred_id: deferred_id.to_string(),
                     result: exec.result,
@@ -102,10 +96,7 @@ pub async fn run_agent(opts: RunAgentOptions) -> anyhow::Result<RunResult> {
             }
         }
         if decision == Some("denied") {
-            let reason = format!(
-                "approval denied for {}",
-                deferred_id.unwrap_or("unknown")
-            );
+            let reason = format!("approval denied for {}", deferred_id.unwrap_or("unknown"));
             let outcome = RunOutcome::Silence { reason };
             log_run(
                 &opts.db,
@@ -351,7 +342,7 @@ fn apply_usage(
         usage.output_tokens += u.output_tokens;
     } else if allow_approximate {
         let approx = serde_json::to_string(transcript)
-            .map(|s| ((s.len() + 3) / 4) as u32)
+            .map(|s| s.len().div_ceil(4) as u32)
             .unwrap_or(0);
         usage.input_tokens += approx;
         usage.output_tokens += 200;
@@ -413,17 +404,12 @@ fn load_session(db: &Db, session_key: &str) -> anyhow::Result<SessionLoad> {
         let result = conn.query_row(
             "SELECT transcript_json, compact_summary FROM sessions WHERE session_key = ?",
             params![session_key],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                ))
-            },
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
         );
         match result {
             Ok((transcript_json, summary)) => {
-                let messages = serde_json::from_str::<Vec<AgentMessage>>(&transcript_json)
-                    .unwrap_or_default();
+                let messages =
+                    serde_json::from_str::<Vec<AgentMessage>>(&transcript_json).unwrap_or_default();
                 Ok(SessionLoad { messages, summary })
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(SessionLoad {

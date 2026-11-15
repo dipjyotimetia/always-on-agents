@@ -47,7 +47,10 @@ impl Brain for MockBrain {
                 .get(1)
                 .and_then(|m| m.as_str().parse().ok())
                 .unwrap_or(0);
-            let unit = caps.get(2).map(|m| m.as_str().to_lowercase()).unwrap_or_default();
+            let unit = caps
+                .get(2)
+                .map(|m| m.as_str().to_lowercase())
+                .unwrap_or_default();
             let seconds = if unit.starts_with("hour") {
                 n * 3600
             } else if unit.starts_with("min") {

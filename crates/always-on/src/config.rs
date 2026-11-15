@@ -13,10 +13,7 @@ fn env_int(name: &str, fallback: i64) -> i64 {
 fn env_bool(name: &str, fallback: bool) -> bool {
     match env::var(name) {
         Ok(raw) if !raw.is_empty() => {
-            matches!(
-                raw.to_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
+            matches!(raw.to_lowercase().as_str(), "1" | "true" | "yes" | "on")
         }
         _ => fallback,
     }
@@ -121,14 +118,13 @@ pub fn load_config(overrides: ConfigOverrides) -> Result<Config> {
         .or_else(|| env::var("DATA_DIR").ok().map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from("./data"));
     let data_dir = std::fs::canonicalize(&data_dir).unwrap_or_else(|_| {
-        let resolved = if data_dir.is_absolute() {
+        if data_dir.is_absolute() {
             data_dir.clone()
         } else {
             env::current_dir()
                 .unwrap_or_else(|_| PathBuf::from("."))
                 .join(&data_dir)
-        };
-        resolved
+        }
     });
 
     std::fs::create_dir_all(&data_dir).context("create data_dir")?;

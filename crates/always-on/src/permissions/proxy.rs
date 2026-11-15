@@ -87,8 +87,7 @@ pub async fn proxied_fetch(
     let client = Client::new();
     let method = opts.method.unwrap_or("POST");
     let mut req = client.request(
-        reqwest::Method::from_bytes(method.as_bytes())
-            .unwrap_or(reqwest::Method::POST),
+        reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::POST),
         opts.url,
     );
     for (k, v) in &opts.headers {

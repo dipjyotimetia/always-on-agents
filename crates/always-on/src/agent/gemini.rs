@@ -1,6 +1,4 @@
-use super::types::{
-    AgentMessage, Brain, BrainInput, BrainOutput, TokenUsage, ToolCall, ToolName,
-};
+use super::types::{AgentMessage, Brain, BrainInput, BrainOutput, TokenUsage, ToolCall, ToolName};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -25,7 +23,7 @@ pub fn create_gemini_brain(opts: GeminiBrainOptions) -> Arc<dyn Brain> {
         api_key: opts.api_key,
         model: opts.model,
         base_url,
-        client: opts.client.unwrap_or_else(reqwest::Client::new),
+        client: opts.client.unwrap_or_default(),
         on_usage: opts.on_usage,
     })
 }

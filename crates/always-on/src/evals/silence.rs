@@ -24,11 +24,7 @@ fn row_to_silence(row: &Row<'_>) -> rusqlite::Result<SilenceEvalRow> {
 }
 
 /// Export recent silence outcomes for offline labeling / attention tuning.
-pub fn list_silences(
-    db: &Db,
-    limit: u32,
-    inbox_id: Option<&str>,
-) -> Result<Vec<SilenceEvalRow>> {
+pub fn list_silences(db: &Db, limit: u32, inbox_id: Option<&str>) -> Result<Vec<SilenceEvalRow>> {
     with_conn(db, |conn| {
         let mut stmt = conn.prepare(
             "SELECT id, session_key, silence_reason, created_at
@@ -38,10 +34,7 @@ pub fn list_silences(
              ORDER BY id DESC
              LIMIT ?2",
         )?;
-        let rows = stmt.query_map(
-            rusqlite::params![inbox_id, limit],
-            row_to_silence,
-        )?;
+        let rows = stmt.query_map(rusqlite::params![inbox_id, limit], row_to_silence)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     })
 }

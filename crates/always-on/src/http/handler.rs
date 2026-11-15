@@ -95,12 +95,8 @@ async fn control_stop_inner(
     let body_json: Value = if body.is_empty() {
         json!({})
     } else {
-        serde_json::from_slice(body).map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                format!("invalid json: {e}"),
-            )
-        })?
+        serde_json::from_slice(body)
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid json: {e}")))?
     };
     let header_secret = headers
         .get("x-approval-secret")
@@ -118,16 +114,9 @@ async fn control_stop_inner(
         Some("false")
     ) && body_json.get("stop").and_then(|v| v.as_bool()) != Some(false);
     if stop {
-        let stamped = format!(
-            "stopped via ui at {}\n",
-            chrono::Utc::now().to_rfc3339()
-        );
-        fs::write(deps.config.stop_path.as_path(), stamped).map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                e.to_string(),
-            )
-        })?;
+        let stamped = format!("stopped via ui at {}\n", chrono::Utc::now().to_rfc3339());
+        fs::write(deps.config.stop_path.as_path(), stamped)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     } else if deps.config.stop_path.exists() {
         fs::remove_file(deps.config.stop_path.as_path()).ok();
     }
@@ -196,12 +185,8 @@ async fn events_inner(
     let body_json: Value = if raw.is_empty() {
         json!({})
     } else {
-        serde_json::from_str(raw).map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                format!("invalid json: {e}"),
-            )
-        })?
+        serde_json::from_str(raw)
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid json: {e}")))?
     };
 
     let source = body_json
@@ -228,9 +213,7 @@ async fn events_inner(
         .get("sessionKey")
         .and_then(|v| v.as_str())
         .map(String::from);
-    let inbox_id = body_json
-        .get("inboxId")
-        .and_then(|v| v.as_str());
+    let inbox_id = body_json.get("inboxId").and_then(|v| v.as_str());
 
     let result = insert_event(
         &deps.db,
@@ -290,12 +273,8 @@ async fn events_approval_inner(
     let body_json: Value = if body.is_empty() {
         json!({})
     } else {
-        serde_json::from_slice(body).map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                format!("invalid json: {e}"),
-            )
-        })?
+        serde_json::from_slice(body)
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid json: {e}")))?
     };
 
     let header_secret = headers
@@ -358,11 +337,7 @@ async fn events_approval_inner(
 }
 
 fn json_error(status: StatusCode, message: &str) -> Response {
-    (
-        status,
-        Json(json!({ "error": message })),
-    )
-        .into_response()
+    (status, Json(json!({ "error": message }))).into_response()
 }
 
 /// HMAC over the raw request body (not re-serialized JSON).

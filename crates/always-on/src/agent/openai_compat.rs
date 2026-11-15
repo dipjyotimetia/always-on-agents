@@ -1,6 +1,4 @@
-use super::types::{
-    AgentMessage, Brain, BrainInput, BrainOutput, TokenUsage, ToolCall, ToolName,
-};
+use super::types::{AgentMessage, Brain, BrainInput, BrainOutput, TokenUsage, ToolCall, ToolName};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -25,7 +23,7 @@ pub fn create_openai_brain(opts: OpenAiBrainOptions) -> Arc<dyn Brain> {
         api_key: opts.api_key,
         model: opts.model,
         base_url,
-        client: opts.client.unwrap_or_else(reqwest::Client::new),
+        client: opts.client.unwrap_or_default(),
         on_usage: opts.on_usage,
     })
 }
@@ -154,19 +152,10 @@ impl Brain for OpenAiBrain {
                     .iter()
                     .filter_map(|c| {
                         let name = c.function.as_ref()?.name.as_deref()?;
-                        let args_raw = c
-                            .function
-                            .as_ref()?
-                            .arguments
-                            .as_deref()
-                            .unwrap_or("{}");
-                        let arguments: Value =
-                            serde_json::from_str(args_raw).unwrap_or(json!({}));
+                        let args_raw = c.function.as_ref()?.arguments.as_deref().unwrap_or("{}");
+                        let arguments: Value = serde_json::from_str(args_raw).unwrap_or(json!({}));
                         Some(ToolCall {
-                            id: c
-                                .id
-                                .clone()
-                                .unwrap_or_else(|| Uuid::new_v4().to_string()),
+                            id: c.id.clone().unwrap_or_else(|| Uuid::new_v4().to_string()),
                             name: parse_tool_name(name),
                             arguments,
                         })
@@ -184,9 +173,7 @@ impl Brain for OpenAiBrain {
         }
 
         Ok(BrainOutput::Message {
-            content: message
-                .and_then(|m| m.content.clone())
-                .unwrap_or_default(),
+            content: message.and_then(|m| m.content.clone()).unwrap_or_default(),
             usage,
         })
     }

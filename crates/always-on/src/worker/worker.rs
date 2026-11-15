@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde_json::Value;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crate::agent::{run_agent, Brain, RunAgentOptions};
 use crate::budgets::{add_tokens_today, increment_runs_today, under_daily_budget};
@@ -34,13 +34,11 @@ pub struct WorkerRunResult {
 }
 
 pub async fn run_worker(opts: WorkerOptions) -> Result<WorkerRunResult> {
-    let inbox_id = opts.inbox_id.clone().unwrap_or_else(|| "default".to_string());
-    let lease = acquire_lease(
-        &opts.db,
-        &inbox_id,
-        None,
-        Some(opts.config.lease_ttl_ms),
-    )?;
+    let inbox_id = opts
+        .inbox_id
+        .clone()
+        .unwrap_or_else(|| "default".to_string());
+    let lease = acquire_lease(&opts.db, &inbox_id, None, Some(opts.config.lease_ttl_ms))?;
     let Some(lease) = lease else {
         return Err(anyhow::anyhow!(
             "inbox {} already leased by another worker",
@@ -152,7 +150,10 @@ async fn idle(opts: &WorkerOptions) {
             .await;
         return;
     }
-    tokio::time::sleep(tokio::time::Duration::from_millis(opts.config.worker_idle_ms)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(
+        opts.config.worker_idle_ms,
+    ))
+    .await;
 }
 
 fn enrich_approval_events(db: &Db, events: &[InboxEvent]) -> Result<Vec<InboxEvent>> {

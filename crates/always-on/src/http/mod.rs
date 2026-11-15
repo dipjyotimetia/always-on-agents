@@ -5,8 +5,8 @@ pub mod ratelimit;
 
 pub use handler::{create_router, HandlerDeps};
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use tokio::net::TcpListener;
 
