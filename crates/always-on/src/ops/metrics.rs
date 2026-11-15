@@ -21,11 +21,7 @@ pub struct BacklogMetrics {
     pub tokens_today: u32,
 }
 
-pub fn get_backlog_metrics(
-    db: &Db,
-    config: &Config,
-    inbox_id: &str,
-) -> Result<BacklogMetrics> {
+pub fn get_backlog_metrics(db: &Db, config: &Config, inbox_id: &str) -> Result<BacklogMetrics> {
     let events = count_by_status(db, inbox_id)?;
 
     let (outbox_pending, outbox_sending, deferred_pending, deferred_expired, active_followups) =

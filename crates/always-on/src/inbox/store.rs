@@ -80,7 +80,9 @@ fn fetch_event(
     source: &str,
     source_id: &str,
 ) -> Result<Option<InboxEvent>> {
-    let sql = format!("SELECT {EVENT_COLUMNS} FROM events WHERE inbox_id = ? AND source = ? AND source_id = ?");
+    let sql = format!(
+        "SELECT {EVENT_COLUMNS} FROM events WHERE inbox_id = ? AND source = ? AND source_id = ?"
+    );
     let mut stmt = conn.prepare(&sql)?;
     let event = stmt
         .query_row(params![inbox_id, source, source_id], row_to_event)
@@ -145,7 +147,8 @@ pub fn insert_event(db: &Db, input: InsertEventInput<'_>) -> Result<InsertEventR
 pub fn reclaim_stale_running(db: &Db, inbox_id: &str) -> Result<u32> {
     with_transaction(db, |conn| {
         let now = now_iso();
-        let sql = format!("SELECT {EVENT_COLUMNS} FROM events WHERE inbox_id = ? AND status = 'running'");
+        let sql =
+            format!("SELECT {EVENT_COLUMNS} FROM events WHERE inbox_id = ? AND status = 'running'");
         let mut stmt = conn.prepare(&sql)?;
         let stale: Vec<InboxEvent> = stmt
             .query_map([inbox_id], row_to_event)?
@@ -210,15 +213,16 @@ pub fn claim_pending_batch(db: &Db, inbox_id: &str, limit: u32) -> Result<Vec<In
                  updated_at = ?
              WHERE id IN ({placeholders})"
         );
-        let mut update_params: Vec<Box<dyn rusqlite::ToSql>> =
-            vec![Box::new(now.clone())];
+        let mut update_params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(now.clone())];
         for id in &ids {
             update_params.push(Box::new(*id));
         }
         conn.execute(
             &update_sql,
             rusqlite::params_from_iter(
-                update_params.iter().map(|b| b.as_ref() as &dyn rusqlite::ToSql),
+                update_params
+                    .iter()
+                    .map(|b| b.as_ref() as &dyn rusqlite::ToSql),
             ),
         )?;
 
@@ -247,9 +251,7 @@ pub fn mark_events_done(db: &Db, ids: &[i64]) -> Result<()> {
         }
         conn.execute(
             &sql,
-            rusqlite::params_from_iter(
-                params.iter().map(|p| p.as_ref() as &dyn rusqlite::ToSql),
-            ),
+            rusqlite::params_from_iter(params.iter().map(|p| p.as_ref() as &dyn rusqlite::ToSql)),
         )?;
         Ok(())
     })
@@ -277,8 +279,7 @@ pub fn mark_events_failed(db: &Db, ids: &[i64], error: &str) -> Result<()> {
                 )?;
             } else {
                 let backoff_sec = std::cmp::min(300, 2_i64.pow(event.attempts as u32));
-                let next = chrono::Utc::now()
-                    + chrono::Duration::seconds(backoff_sec);
+                let next = chrono::Utc::now() + chrono::Duration::seconds(backoff_sec);
                 let next_iso = next.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
                 conn.execute(
                     "UPDATE events

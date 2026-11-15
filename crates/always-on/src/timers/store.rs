@@ -88,10 +88,7 @@ pub fn create_followup(db: &Db, opts: CreateFollowupOpts<'_>) -> Result<TimerRow
     let due_ms = std::cmp::max(opts.due_at.timestamp_millis(), earliest_ms);
 
     if count_active_followups(db, inbox_id)? >= opts.max_active_followups {
-        bail!(
-            "follow-up cap reached ({})",
-            opts.max_active_followups
-        );
+        bail!("follow-up cap reached ({})", opts.max_active_followups);
     }
 
     let due_iso = DateTime::<Utc>::from_timestamp_millis(due_ms)
@@ -103,17 +100,11 @@ pub fn create_followup(db: &Db, opts: CreateFollowupOpts<'_>) -> Result<TimerRow
         conn.execute(
             "INSERT INTO timers (inbox_id, kind, due_at, session_key, payload)
              VALUES (?, 'followup', ?, ?, ?)",
-            params![
-                inbox_id,
-                due_iso,
-                opts.session_key,
-                payload.to_string()
-            ],
+            params![inbox_id, due_iso, opts.session_key, payload.to_string()],
         )?;
         let id = conn.last_insert_rowid();
         let sql = format!("SELECT {TIMER_COLUMNS} FROM timers WHERE id = ?");
-        conn.query_row(&sql, [id], row_to_timer)
-            .map_err(Into::into)
+        conn.query_row(&sql, [id], row_to_timer).map_err(Into::into)
     })
 }
 
@@ -145,8 +136,7 @@ pub fn create_schedule(db: &Db, opts: CreateScheduleOpts<'_>) -> Result<TimerRow
         )?;
         let id = conn.last_insert_rowid();
         let sql = format!("SELECT {TIMER_COLUMNS} FROM timers WHERE id = ?");
-        conn.query_row(&sql, [id], row_to_timer)
-            .map_err(Into::into)
+        conn.query_row(&sql, [id], row_to_timer).map_err(Into::into)
     })
 }
 
@@ -187,8 +177,7 @@ pub fn fire_due_timers(db: &Db, now: DateTime<Utc>) -> Result<u32> {
             }
 
             let source_id = format!("{}:{}", fresh.id, fresh.due_at);
-            let body: Value =
-                serde_json::from_str(&fresh.payload).unwrap_or(Value::Null);
+            let body: Value = serde_json::from_str(&fresh.payload).unwrap_or(Value::Null);
 
             // insert_event needs Connection - inline the insert within transaction
             let payload = serde_json::json!({

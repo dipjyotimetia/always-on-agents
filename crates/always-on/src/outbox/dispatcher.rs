@@ -3,8 +3,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crate::config::Config;
 use crate::db::Db;
@@ -23,9 +23,8 @@ pub struct DeliverPayload {
     pub meta: HashMap<String, Value>,
 }
 
-pub type DeliverFn = Arc<
-    dyn Fn(DeliverPayload) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync,
->;
+pub type DeliverFn =
+    Arc<dyn Fn(DeliverPayload) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync>;
 
 fn default_deliver() -> DeliverFn {
     Arc::new(|msg| {
@@ -57,11 +56,7 @@ pub async fn run_dispatcher(opts: DispatcherOptions) -> Result<u32> {
     let deliver = opts.deliver.unwrap_or_else(default_deliver);
     let mut sent = 0u32;
 
-    async fn tick(
-        db: &Db,
-        config: &Config,
-        deliver: &DeliverFn,
-    ) -> Result<u32> {
+    async fn tick(db: &Db, config: &Config, deliver: &DeliverFn) -> Result<u32> {
         if is_stopped(config) {
             return Ok(0);
         }

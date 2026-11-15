@@ -28,8 +28,7 @@ const DEFAULT_REPORTED: &str = "# Already reported to the user\n\n(empty)\n";
 
 const DEFAULT_PREFERENCES: &str = "# Preferences\nprovenance: user\n\n(none yet)\n";
 
-const DEFAULT_INFERRED: &str =
-    "# Inferred notes\nprovenance: inferred_untrusted\n\n(none yet)\n";
+const DEFAULT_INFERRED: &str = "# Inferred notes\nprovenance: inferred_untrusted\n\n(none yet)\n";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryProvenance {
@@ -107,9 +106,8 @@ pub fn ensure_memory_layout(memory_dir: &Path) -> Result<()> {
     if ver < MEMORY_LAYOUT_VERSION {
         fs::write(&ver_path, MEMORY_LAYOUT_VERSION.to_string())?;
         let stamp = chrono::Utc::now().to_rfc3339();
-        let migration = format!(
-            "\n\n<!-- migrated to layout_version {MEMORY_LAYOUT_VERSION} at {stamp} -->\n"
-        );
+        let migration =
+            format!("\n\n<!-- migrated to layout_version {MEMORY_LAYOUT_VERSION} at {stamp} -->\n");
         let index_path = memory_dir.join("index.md");
         let mut index = fs::read_to_string(&index_path).unwrap_or_default();
         index.push_str(&migration);
@@ -217,8 +215,7 @@ pub fn list_progress_files(memory_dir: &Path) -> Result<Vec<String>> {
 }
 
 pub fn read_provenance(content: &str) -> Option<MemoryProvenance> {
-    static RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?m)^provenance:\s*(\S+)").unwrap());
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^provenance:\s*(\S+)").unwrap());
     RE.captures(content)
         .and_then(|c| c.get(1))
         .and_then(|m| MemoryProvenance::parse(m.as_str()))

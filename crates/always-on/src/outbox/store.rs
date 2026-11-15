@@ -150,7 +150,8 @@ pub fn claim_pending_outbox(db: &Db, limit: u32) -> Result<Vec<OutboxMessage>> {
             rusqlite::params_from_iter(params.iter().map(|p| p.as_ref() as &dyn rusqlite::ToSql)),
         )?;
 
-        let select_sql = format!("SELECT {OUTBOX_COLUMNS} FROM outbox WHERE id IN ({placeholders})");
+        let select_sql =
+            format!("SELECT {OUTBOX_COLUMNS} FROM outbox WHERE id IN ({placeholders})");
         let mut stmt = conn.prepare(&select_sql)?;
         let claimed: Vec<OutboxMessage> = stmt
             .query_map(rusqlite::params_from_iter(ids.iter()), row_to_outbox)?

@@ -65,11 +65,9 @@ pub async fn execute_approved_call(
                             ("subject".to_string(), json!(subject)),
                             (
                                 "credentialLabel".to_string(),
-                                json!(
-                                    credentials
-                                        .has("external_mail")
-                                        .then(|| credentials.label("external_mail"))
-                                ),
+                                json!(credentials
+                                    .has("external_mail")
+                                    .then(|| credentials.label("external_mail"))),
                             ),
                         ])),
                         idempotency_key: Some(&format!("exec:{idem_key}")),
@@ -134,10 +132,7 @@ pub async fn execute_approved_call(
             }
         };
         mark_deferred_executed(db, &row.id, &result)?;
-        Ok(ExecuteApprovedResult {
-            ok: true,
-            result,
-        })
+        Ok(ExecuteApprovedResult { ok: true, result })
     }
     .await;
 

@@ -86,11 +86,7 @@ pub fn get_deferred_call(db: &Db, id: &str) -> Result<Option<DeferredCall>> {
     })
 }
 
-pub fn resolve_deferred_call(
-    db: &Db,
-    id: &str,
-    decision: &str,
-) -> Result<DeferredCall> {
+pub fn resolve_deferred_call(db: &Db, id: &str, decision: &str) -> Result<DeferredCall> {
     let row = get_deferred_call(db, id)?;
     let Some(row) = row else {
         bail!("unknown deferred call: {id}");
@@ -186,10 +182,7 @@ pub fn classify_risk(tool_name: &str, args: &HashMap<String, Value>) -> &'static
         return "allow";
     }
     if tool_name == "shell" || tool_name == "bash" {
-        let cmd = args
-            .get("command")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let cmd = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
         if SHELL_BLOCK_RE.is_match(cmd) {
             return "block";
         }

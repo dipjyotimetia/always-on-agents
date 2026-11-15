@@ -1,7 +1,7 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::sync::Notify;
-use tokio::time::{sleep, Duration, Instant};
+use tokio::time::{sleep, Duration};
 
 /// In-process wake channel: ingress signals the worker to skip idle sleep.
 #[derive(Debug, Default)]
@@ -21,30 +21,21 @@ impl WakeBus {
     }
 
     pub async fn wait(&self, timeout_ms: u64, shutdown: Option<&Arc<AtomicBool>>) {
-        if shutdown
-            .map(|s| s.load(Ordering::Relaxed))
-            .unwrap_or(false)
-        {
+        if shutdown.map(|s| s.load(Ordering::Relaxed)).unwrap_or(false) {
             return;
         }
 
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-        loop {
-            if shutdown
-                .map(|s| s.load(Ordering::Relaxed))
-                .unwrap_or(false)
-            {
-                return;
-            }
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return;
-            }
+        if shutdown.map(|s| s.load(Ordering::Relaxed)).unwrap_or(false) {
+            return;
+        }
+        let remaining = Duration::from_millis(timeout_ms);
+        if remaining.is_zero() {
+            return;
+        }
 
-            tokio::select! {
-                _ = self.notify.notified() => return,
-                _ = sleep(remaining) => return,
-            }
+        tokio::select! {
+            _ = self.notify.notified() => {}
+            _ = sleep(remaining) => {}
         }
     }
 }

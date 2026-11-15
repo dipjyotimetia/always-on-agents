@@ -1,6 +1,4 @@
-use super::types::{
-    AgentMessage, Brain, BrainInput, BrainOutput, TokenUsage, ToolCall, ToolName,
-};
+use super::types::{AgentMessage, Brain, BrainInput, BrainOutput, TokenUsage, ToolCall, ToolName};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -25,7 +23,7 @@ pub fn create_anthropic_brain(opts: AnthropicBrainOptions) -> Arc<dyn Brain> {
         api_key: opts.api_key,
         model: opts.model,
         base_url,
-        client: opts.client.unwrap_or_else(reqwest::Client::new),
+        client: opts.client.unwrap_or_default(),
         on_usage: opts.on_usage,
     })
 }
@@ -48,7 +46,9 @@ struct AnthropicResponse {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum AnthropicContentBlock {
-    Text { text: String },
+    Text {
+        text: String,
+    },
     ToolUse {
         id: Option<String>,
         name: String,
@@ -141,11 +141,7 @@ impl Brain for AnthropicBrain {
         for block in data.content.unwrap_or_default() {
             match block {
                 AnthropicContentBlock::Text { text } => texts.push(text),
-                AnthropicContentBlock::ToolUse {
-                    id,
-                    name,
-                    input,
-                } => {
+                AnthropicContentBlock::ToolUse { id, name, input } => {
                     let tool_name = parse_tool_name(&name);
                     tool_calls.push(ToolCall {
                         id: id.unwrap_or_else(|| Uuid::new_v4().to_string()),

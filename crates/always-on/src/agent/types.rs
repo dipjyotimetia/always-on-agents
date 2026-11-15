@@ -59,8 +59,12 @@ pub struct ToolResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "role", rename_all = "lowercase")]
 pub enum AgentMessage {
-    System { content: String },
-    User { content: String },
+    System {
+        content: String,
+    },
+    User {
+        content: String,
+    },
     Assistant {
         content: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -76,8 +80,12 @@ pub enum AgentMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RunOutcome {
-    Notified { body: String },
-    Silence { reason: String },
+    Notified {
+        body: String,
+    },
+    Silence {
+        reason: String,
+    },
     Deferred {
         deferred_id: String,
         summary: String,
@@ -86,7 +94,9 @@ pub enum RunOutcome {
         deferred_id: String,
         result: Value,
     },
-    Error { error: String },
+    Error {
+        error: String,
+    },
 }
 
 #[derive(Debug, Clone)]

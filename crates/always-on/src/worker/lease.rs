@@ -123,13 +123,7 @@ pub fn heartbeat_lease(db: &Db, lease: &Lease, ttl_ms: u64) -> Result<bool> {
             "UPDATE leases
              SET heartbeat_at = ?, expires_at = ?
              WHERE inbox_id = ? AND owner = ? AND fence = ?",
-            params![
-                now_iso(),
-                expires,
-                lease.inbox_id,
-                lease.owner,
-                lease.fence
-            ],
+            params![now_iso(), expires, lease.inbox_id, lease.owner, lease.fence],
         )?;
         Ok(n == 1)
     })
