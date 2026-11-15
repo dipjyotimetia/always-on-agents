@@ -1,0 +1,28 @@
+{
+  "name": "always-on-agents",
+  "version": "0.1.0",
+  "description": "Always-on agent runtime: durable inbox, timers, memory, permissions, outbox",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "always-on": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --experimental-sqlite dist/cli.js",
+    "dev": "node --experimental-sqlite --import tsx src/cli.ts",
+    "test": "node --experimental-sqlite ./node_modules/vitest/vitest.mjs run",
+    "test:watch": "node --experimental-sqlite ./node_modules/vitest/vitest.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.8"
+  },
+  "packageManager": "pnpm@10.33.4"
+}
