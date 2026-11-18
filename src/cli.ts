@@ -1,6 +1,7 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 import { createRuntime } from "./runtime.js";
 import { insertEvent } from "./inbox/store.js";
+import { listRoutineHistory, listRoutines, saveRoutine, setRoutinePaused, testRoutine } from "./timers/routines.js";
 import { createFollowup, createSchedule } from "./timers/store.js";
 import { writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { getBacklogMetrics } from "./ops/metrics.js";
@@ -15,6 +16,8 @@ Usage:
   always-on ingest <json>      Insert an inbox event (JSON object)
   always-on followup <secs> [note]
   always-on schedule <secs>    Create recurring schedule every <secs>
+  always-on routine save <name> <secs> <instruction>
+  always-on routine list|pause|resume|test|history [name]
   always-on stop               Create STOP kill switch
   always-on resume             Remove STOP kill switch
   always-on metrics            Print backlog / STOP / budget metrics
@@ -76,6 +79,34 @@ async function main(): Promise<void> {
           payload: { note: "cli schedule" },
         });
         console.log(JSON.stringify(timer));
+        break;
+      }
+      case "routine": {
+        const [action, name, every, ...instruction] = args;
+        if (action === "list") {
+          console.log(JSON.stringify({ agent: runtime.config.agentName, routines: listRoutines(runtime.db) }, null, 2));
+          break;
+        }
+        if (!name) usage();
+        switch (action) {
+          case "save":
+            console.log(JSON.stringify(saveRoutine(runtime.db, {
+              name, everySeconds: Number(every), instruction: instruction.join(" "),
+            })));
+            break;
+          case "pause":
+          case "resume":
+            console.log(JSON.stringify(setRoutinePaused(runtime.db, name, action === "pause")));
+            break;
+          case "test":
+            console.log(JSON.stringify(testRoutine(runtime.db, name)));
+            break;
+          case "history":
+            console.log(JSON.stringify(listRoutineHistory(runtime.db, name), null, 2));
+            break;
+          default:
+            usage();
+        }
         break;
       }
       case "stop":

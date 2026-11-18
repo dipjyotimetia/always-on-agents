@@ -122,7 +122,7 @@ export function claimPendingBatch(
          WHERE inbox_id = ?
            AND status = 'pending'
            AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-         ORDER BY created_at ASC
+         ORDER BY created_at ASC, id ASC
          LIMIT ?`,
       )
       .all(inboxId, now, limit) as InboxEvent[];
@@ -140,7 +140,7 @@ export function claimPendingBatch(
     ).run(now, ...ids);
 
     return db
-      .prepare(`SELECT * FROM events WHERE id IN (${placeholders})`)
+      .prepare(`SELECT * FROM events WHERE id IN (${placeholders}) ORDER BY created_at ASC, id ASC`)
       .all(...ids) as InboxEvent[];
   });
 }

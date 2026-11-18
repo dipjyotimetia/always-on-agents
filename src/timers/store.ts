@@ -72,6 +72,10 @@ export function createSchedule(
     payload: unknown;
   },
 ): TimerRow {
+  if (!Number.isSafeInteger(opts.everyS) || opts.everyS < 1 ||
+      opts.everyS > 31_536_000 || !Number.isFinite(opts.dueAt.getTime())) {
+    throw new Error("Schedule requires a valid date and an interval from 1 second to 1 year");
+  }
   const result = db
     .prepare(
       `INSERT INTO timers (inbox_id, kind, due_at, every_s, session_key, payload)
@@ -113,13 +117,18 @@ export function fireDueTimers(db: Db, now = new Date()): number {
       if (!fresh || fresh.status !== "active") return;
       if (new Date(fresh.due_at).getTime() > now.getTime()) return;
 
+      const routine = db.query<{ name: string; instruction: string }, [number]>(
+        "SELECT name, instruction FROM routines WHERE timer_id = ?",
+      ).get(fresh.id);
       const sourceId = `${fresh.id}:${fresh.due_at}`;
       insertEvent(db, {
         inboxId: fresh.inbox_id,
-        source: "timer",
+        source: routine ? "routine" : "timer",
         sourceId,
         sessionKey: fresh.session_key,
-        payload: {
+        payload: routine
+          ? { ...routine, trigger: "schedule", dueAt: fresh.due_at }
+          : {
           timerId: fresh.id,
           kind: fresh.kind,
           dueAt: fresh.due_at,
@@ -132,11 +141,10 @@ export function fireDueTimers(db: Db, now = new Date()): number {
           `UPDATE timers SET status = 'done', updated_at = ? WHERE id = ?`,
         ).run(nowIso(), fresh.id);
       } else {
-        const every = fresh.every_s ?? 86_400;
-        let next = new Date(fresh.due_at).getTime() + every * 1000;
-        while (next <= now.getTime()) {
-          next += every * 1000;
-        }
+        const seconds = fresh.every_s ?? 86_400;
+        const interval = (Number.isSafeInteger(seconds) && seconds >= 1 ? seconds : 86_400) * 1000;
+        const previous = Date.parse(fresh.due_at);
+        const next = previous + (Math.floor((now.getTime() - previous) / interval) + 1) * interval;
         db.prepare(
           `UPDATE timers SET due_at = ?, updated_at = ? WHERE id = ?`,
         ).run(new Date(next).toISOString(), nowIso(), fresh.id);

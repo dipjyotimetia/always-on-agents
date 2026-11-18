@@ -5,7 +5,6 @@ import type {
   BrainInput,
   BrainOutput,
   ToolCall,
-  ToolName,
 } from "./types.js";
 
 export type OpenAiBrainOptions = {
@@ -21,6 +20,7 @@ export type OpenAiChatClient = {
     completions: {
       create: (
         body: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
+      options?: { signal?: AbortSignal },
       ) => Promise<OpenAI.Chat.ChatCompletion>;
     };
   };
@@ -47,7 +47,7 @@ export function createOpenAiBrain(opts: OpenAiBrainOptions): Brain {
             parameters: tool.inputSchema,
           },
         })),
-      });
+      }, input.signal ? { signal: input.signal } : undefined);
 
       const choice = response.choices[0]?.message;
       const usage = {
@@ -56,10 +56,13 @@ export function createOpenAiBrain(opts: OpenAiBrainOptions): Brain {
       };
       const toolCalls: ToolCall[] = (choice?.tool_calls ?? []).flatMap((call) => {
         if (call.type !== "function") return [];
+        const { name } = call.function;
+        const tool = input.tools.find((item) => item.name === name);
+        if (!tool) return [];
         return [
           {
             id: call.id || randomUUID(),
-            name: call.function.name as ToolName,
+            name: tool.name,
             arguments: parseArgs(call.function.arguments),
           },
         ];
@@ -89,7 +92,7 @@ function createOfficialClient(opts: OpenAiBrainOptions): OpenAiChatClient {
   return {
     chat: {
       completions: {
-        create: (body) => sdk.chat.completions.create(body),
+        create: (body, options) => sdk.chat.completions.create(body, options),
       },
     },
   };

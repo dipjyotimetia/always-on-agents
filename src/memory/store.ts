@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -5,6 +6,9 @@ import {
   writeFileSync,
   readdirSync,
   appendFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
 } from "node:fs";
 import path from "node:path";
 
@@ -13,7 +17,7 @@ export const MEMORY_LAYOUT_VERSION = 2;
 const DEFAULT_INSTRUCTIONS = `# Agent instructions (user-owned — agent must not edit)
 
 - Prefer silence unless a decision is needed or something changed that the user would act on today.
-- Before notifying, check reported.md so you do not repeat yourself.
+- Consider recent confirmed deliveries before notifying again.
 - Store only what you cannot look up again; prefer pointers to external systems.
 - For high-risk side effects (emailing others, spending money, deleting data), use request_approval.
 - Cap proactive follow-ups; do not schedule tight loops.
@@ -117,27 +121,23 @@ export function writeMemoryFile(
     provenance?: MemoryProvenance;
   } = {},
 ): void {
-  const normalized = relPath.replaceAll("\\", "/");
-  if (normalized === "instructions.md" && !opts.allowInstructions) {
-    throw new Error("instructions.md is user-owned; agent cannot write it");
+  const resolved = resolveSafe(memoryDir, relPath.replaceAll("\\", "/"));
+  const normalized = path.relative(path.resolve(memoryDir), resolved).split(path.sep).join("/");
+  if (!opts.allowInstructions && ["instructions.md", "index.md", "reported.md", "LAYOUT_VERSION", "notes/preferences.md"].includes(normalized)) {
+    throw new Error("operator-owned memory cannot be modified by the agent");
   }
   const provenance = opts.provenance ?? "agent";
-  let body = content;
-  if (!/^provenance:/m.test(body) && normalized.startsWith("notes/")) {
-    body = `provenance: ${provenance}\nupdated: ${new Date().toISOString()}\n\n${body}`;
-  }
-  // Downgrade path: inferred notes go to inferred.md unless explicitly user/verified
-  let target = normalized;
-  if (
-    provenance === "inferred_untrusted" &&
-    normalized.startsWith("notes/") &&
-    !normalized.endsWith("inferred.md")
-  ) {
-    // Keep caller path but stamp provenance; caller may still write preferences only as user
-  }
-  const resolved = resolveSafe(memoryDir, target);
+  const body = normalized.startsWith("notes/")
+    ? `provenance: ${provenance}\nupdated: ${new Date().toISOString()}\n\n${content.replace(/^provenance:.*$/gm, "")}`
+    : content;
   mkdirSync(path.dirname(resolved), { recursive: true });
-  writeFileSync(resolved, body, "utf8");
+  const temp = path.join(path.dirname(resolved), `.memory-${randomUUID()}.tmp`);
+  try {
+    writeFileSync(temp, body, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    renameSync(temp, resolved);
+  } finally {
+    rmSync(temp, { force: true });
+  }
 }
 
 export function appendReported(memoryDir: string, line: string): void {
@@ -174,6 +174,16 @@ function resolveSafe(root: string, relPath: string): string {
   const rootResolved = path.resolve(root);
   if (resolved !== rootResolved && !resolved.startsWith(rootResolved + path.sep)) {
     throw new Error("path escapes memory directory");
+  }
+  const rootReal = realpathSync(rootResolved);
+  let ancestor = resolved;
+  while (!existsSync(ancestor)) ancestor = path.dirname(ancestor);
+  const ancestorReal = realpathSync(ancestor);
+  if (ancestorReal !== rootReal && !ancestorReal.startsWith(rootReal + path.sep)) {
+    throw new Error("memory path escapes through a symlink");
+  }
+  if (ancestorReal !== path.join(rootReal, path.relative(rootResolved, ancestor))) {
+    throw new Error("memory paths cannot contain symlinks");
   }
   return resolved;
 }

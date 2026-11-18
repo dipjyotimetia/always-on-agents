@@ -39,10 +39,10 @@ export function acquireLease(
       return { inboxId, owner, fence: 1 };
     }
 
-    if (existing.owner === owner) {
+    if (existing.owner === owner && existing.expires_at > nowIsoStr) {
       db.prepare(
-        `UPDATE leases SET heartbeat_at = ?, expires_at = ? WHERE inbox_id = ? AND owner = ? AND fence = ?`,
-      ).run(nowIsoStr, expires, inboxId, owner, existing.fence);
+        `UPDATE leases SET heartbeat_at = ?, expires_at = ? WHERE inbox_id = ? AND owner = ? AND fence = ? AND expires_at > ?`,
+      ).run(nowIsoStr, expires, inboxId, owner, existing.fence, nowIsoStr);
       return { inboxId, owner, fence: existing.fence };
     }
 
@@ -81,22 +81,22 @@ export function heartbeatLease(
     .prepare(
       `UPDATE leases
        SET heartbeat_at = ?, expires_at = ?
-       WHERE inbox_id = ? AND owner = ? AND fence = ?`,
+       WHERE inbox_id = ? AND owner = ? AND fence = ? AND expires_at > ?`,
     )
-    .run(nowIso(), expires, lease.inboxId, lease.owner, lease.fence);
+    .run(nowIso(), expires, lease.inboxId, lease.owner, lease.fence, nowIso());
   return Number(result.changes) === 1;
 }
 
 export function releaseLease(db: Db, lease: Lease): void {
   db.prepare(
-    `DELETE FROM leases WHERE inbox_id = ? AND owner = ? AND fence = ?`,
-  ).run(lease.inboxId, lease.owner, lease.fence);
+    `UPDATE leases SET expires_at = ? WHERE inbox_id = ? AND owner = ? AND fence = ?`,
+  ).run(nowIso(), lease.inboxId, lease.owner, lease.fence);
 }
 
 export function assertFence(db: Db, lease: Lease): void {
   const row = db
-    .prepare(`SELECT owner, fence FROM leases WHERE inbox_id = ?`)
-    .get(lease.inboxId) as { owner: string; fence: number } | undefined;
+    .prepare(`SELECT owner, fence FROM leases WHERE inbox_id = ? AND expires_at > ?`)
+    .get(lease.inboxId, nowIso()) as { owner: string; fence: number } | undefined;
   if (!row || row.owner !== lease.owner || row.fence !== lease.fence) {
     throw new Error(`stale lease fence for inbox ${lease.inboxId}`);
   }

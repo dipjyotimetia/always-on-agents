@@ -3,9 +3,9 @@ import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer, type Server } from "node:http";
 import type { Config } from "../config.js";
-import type { Db } from "../db.js";
+import { withTransaction, type Db } from "../db.js";
 import { insertEvent } from "../inbox/store.js";
-import { resolveDeferredCall } from "../permissions/defer.js";
+import { ApprovalConflict, resolveDeferredCall } from "../permissions/defer.js";
 import { renderDashboardPage } from "../ui/page.js";
 import { getDashboardSnapshot } from "../ui/snapshot.js";
 import { checkRateLimit } from "./ratelimit.js";
@@ -45,12 +45,15 @@ async function handle(
     }
 
     if (deps.config.enableUi && req.method === "GET" && url.pathname === "/api/dashboard") {
+      if (!secretsEqual(String(req.headers["x-approval-secret"] ?? ""), deps.config.approvalSecret)) {
+        return json(res, 401, { error: "operator authentication required" });
+      }
       return json(res, 200, getDashboardSnapshot(deps.db, deps.config));
     }
 
     if (deps.config.enableUi && req.method === "POST" && url.pathname === "/api/control/stop") {
       const raw = await readRawBody(req, deps.config.maxBodyBytes);
-      const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+      const body = parseBody(raw);
       const secret = String(body.secret ?? req.headers["x-approval-secret"] ?? "");
       if (!secretsEqual(secret, deps.config.approvalSecret)) {
         return json(res, 401, { error: "invalid approval secret" });
@@ -85,23 +88,31 @@ async function handle(
       if (deps.config.requireWebhookSecret && !deps.config.webhookSecret) {
         return json(res, 500, { error: "webhook secret not configured" });
       }
-      if (deps.config.webhookSecret) {
+      const operator = secretsEqual(String(req.headers["x-approval-secret"] ?? ""), deps.config.approvalSecret);
+      if (deps.config.webhookSecret && !operator) {
         const sig = String(req.headers["x-signature"] ?? "");
         if (!verifySignature(deps.config.webhookSecret, raw, sig)) {
           return json(res, 401, { error: "invalid signature" });
         }
       }
 
-      const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+      const body = parseBody(raw);
       const source = String(body.source ?? "webhook");
+      if (source === "approval" || source === "timer" || source === "routine") {
+        return json(res, 400, { error: "reserved event source" });
+      }
       const sourceId = String(body.sourceId ?? body.id ?? "");
       if (!sourceId) return json(res, 400, { error: "sourceId required" });
 
+      const sessionKey = typeof body.sessionKey === "string" && body.sessionKey ? body.sessionKey : null;
+      if (sessionKey?.startsWith("routine:") || sessionKey?.startsWith("ephemeral:")) {
+        return json(res, 400, { error: "reserved session key" });
+      }
       const result = insertEvent(deps.db, {
         inboxId: String(body.inboxId ?? "default"),
         source,
         sourceId,
-        sessionKey: body.sessionKey ? String(body.sessionKey) : null,
+        sessionKey,
         payload: body.payload ?? body,
         maxAttempts: deps.config.eventMaxAttempts,
       });
@@ -123,27 +134,29 @@ async function handle(
       if (!rl.allowed) return json(res, 429, { error: "rate limit exceeded" });
 
       const raw = await readRawBody(req, deps.config.maxBodyBytes);
-      const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+      const body = parseBody(raw);
       const secret = String(body.secret ?? req.headers["x-approval-secret"] ?? "");
       if (!secretsEqual(secret, deps.config.approvalSecret)) {
         return json(res, 401, { error: "invalid approval secret" });
       }
 
       const deferredId = String(body.deferredId ?? "");
-      const decision = body.decision === "denied" ? "denied" : "approved";
+      const decision = body.decision;
+      if (decision !== "approved" && decision !== "denied") {
+        return json(res, 400, { error: "decision must be approved or denied" });
+      }
       if (!deferredId) return json(res, 400, { error: "deferredId required" });
 
-      const deferred = resolveDeferredCall(deps.db, { id: deferredId, decision });
-      const result = insertEvent(deps.db, {
-        inboxId: deferred.inbox_id,
-        source: "approval",
-        sourceId: `${deferredId}:${decision}`,
-        sessionKey: deferred.session_key,
-        payload: {
-          type: "approval",
-          deferredId,
-          decision,
-        },
+      const { deferred, result } = withTransaction(deps.db, () => {
+        const deferred = resolveDeferredCall(deps.db, { id: deferredId, decision });
+        const result = insertEvent(deps.db, {
+          inboxId: deferred.inbox_id,
+          source: "approval",
+          sourceId: `${deferredId}:${decision}`,
+          sessionKey: deferred.session_key,
+          payload: { type: "approval", deferredId, decision },
+        });
+        return { deferred, result };
       });
 
       deps.onEvent?.();
@@ -158,12 +171,13 @@ async function handle(
     json(res, 404, { error: "not found" });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    const status = message.includes("body too large") ? 413 : 500;
-    json(res, status, { error: message });
+    const status = err instanceof SyntaxError ? 400 : message === "body too large" ? 413
+      : err instanceof ApprovalConflict ? 409 : 500;
+    json(res, status, { error: status === 500 ? "internal server error" : message });
   }
 }
 
-async function readRawBody(req: IncomingMessage, maxBytes: number): Promise<string> {
+async function readRawBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
@@ -172,13 +186,22 @@ async function readRawBody(req: IncomingMessage, maxBytes: number): Promise<stri
     if (size > maxBytes) throw new Error("body too large");
     chunks.push(buf);
   }
-  return Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks);
+}
+
+function parseBody(raw: Buffer): Record<string, unknown> {
+  const parsed: unknown = raw.length ? JSON.parse(raw.toString("utf8")) : {};
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new SyntaxError("expected a JSON object");
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
     "content-type": "application/json",
+    "cache-control": "no-store",
     "content-length": Buffer.byteLength(payload),
   });
   res.end(payload);
@@ -194,7 +217,7 @@ function html(res: ServerResponse, status: number, body: string): void {
 }
 
 /** HMAC over the raw request body (not re-serialized JSON). */
-function verifySignature(secret: string, rawBody: string, header: string): boolean {
+function verifySignature(secret: string, rawBody: Buffer, header: string): boolean {
   const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
   const provided = header.replace(/^sha256=/, "");
   try {

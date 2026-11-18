@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 import type Anthropic from "@anthropic-ai/sdk";
 import type OpenAI from "openai";
 import type { GenerateContentParameters } from "@google/genai";
@@ -69,11 +69,12 @@ describe("official SDK brains", () => {
       cacheableSystemPrefix: PREFIX,
     });
 
-    expect(body?.tools?.[0]?.input_schema.properties).toMatchObject({
+    const customTools = body?.tools?.filter((tool) => "input_schema" in tool) ?? [];
+    expect(customTools[0]?.input_schema.properties).toMatchObject({
       path: { type: "string" },
     });
-    expect(body?.tools?.map((tool) => tool.name)).toContain("proxied_request");
-    const proxied = body?.tools?.find((tool) => tool.name === "proxied_request");
+    expect(customTools.map((tool) => tool.name)).toContain("proxied_request");
+    const proxied = customTools.find((tool) => tool.name === "proxied_request");
     expect(proxied?.input_schema.required).toContain("url");
 
     const system = body?.system;
@@ -190,7 +191,8 @@ describe("official SDK brains", () => {
     expect(String(body?.config?.systemInstruction).startsWith(PREFIX)).toBe(true);
     expect(String(body?.config?.systemInstruction)).toContain("already told the user");
     expect(body?.config?.automaticFunctionCalling).toEqual({ disable: true });
-    const declarations = body?.config?.tools?.[0]?.functionDeclarations ?? [];
+    const tool = body?.config?.tools?.[0];
+    const declarations = tool && "functionDeclarations" in tool ? tool.functionDeclarations ?? [] : [];
     const readMemory = declarations.find((decl) => decl.name === "read_memory");
     expect(readMemory?.parametersJsonSchema).toMatchObject({
       properties: { path: { type: "string" } },
