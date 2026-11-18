@@ -32,7 +32,7 @@ export type RunOutcome =
   | { type: "notified"; body: string }
   | { type: "silence"; reason: string }
   | { type: "deferred"; deferredId: string; summary: string }
-  | { type: "executed_approval"; deferredId: string; result: unknown }
+  | { type: "executed_approval" | "failed_approval"; deferredId: string; result: unknown }
   | { type: "error"; error: string };
 
 /** JSON Schema object passed to official provider SDKs as the tool input schema. */
@@ -52,6 +52,7 @@ export type ToolDef = {
 export type BrainInput = {
   messages: AgentMessage[];
   tools: ToolDef[];
+  signal?: AbortSignal;
   /**
    * Instructions and memory index loaded on every run.
    * Anthropic caches this block; other providers keep it at the front of the prompt.

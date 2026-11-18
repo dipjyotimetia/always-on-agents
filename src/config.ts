@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { BrainKind } from "./agent/factory.js";
@@ -42,6 +43,9 @@ export type Config = {
   webhookSecret: string;
   requireWebhookSecret: boolean;
   approvalSecret: string;
+  deliveryWebhookUrl?: string;
+  deliveryTimeoutMs: number;
+  agentName: string;
   brain: BrainKind;
   anthropicApiKey: string | undefined;
   anthropicModel: string;
@@ -79,7 +83,7 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
   mkdirSync(path.join(dataDir, "memory"), { recursive: true });
   mkdirSync(path.join(dataDir, "transcripts"), { recursive: true });
 
-  return {
+  const config: Config = {
     dataDir,
     dbPath: path.join(dataDir, "runtime.db"),
     memoryDir: path.join(dataDir, "memory"),
@@ -91,7 +95,10 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     requireWebhookSecret:
       overrides.requireWebhookSecret ?? envBool("REQUIRE_WEBHOOK_SECRET", false),
     approvalSecret:
-      overrides.approvalSecret ?? process.env.APPROVAL_SECRET ?? "dev-approval-secret",
+      overrides.approvalSecret ?? process.env.APPROVAL_SECRET ?? randomBytes(32).toString("hex"),
+    deliveryWebhookUrl: overrides.deliveryWebhookUrl ?? process.env.DELIVERY_WEBHOOK_URL,
+    deliveryTimeoutMs: overrides.deliveryTimeoutMs ?? envInt("DELIVERY_TIMEOUT_MS", 10_000),
+    agentName: overrides.agentName ?? process.env.AGENT_NAME ?? "Personal agent",
     brain: overrides.brain ?? envBrain(),
     anthropicApiKey: overrides.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY,
     anthropicModel:
@@ -141,4 +148,17 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
       overrides.autoNotifyBareText ?? envBool("AUTO_NOTIFY_BARE_TEXT", false),
     enableUi: overrides.enableUi ?? envBool("ENABLE_UI", true),
   };
+  if (!config.approvalSecret.trim()) throw new Error("APPROVAL_SECRET cannot be empty");
+  if (!["127.0.0.1", "::1", "localhost"].includes(config.host) &&
+      ((!overrides.approvalSecret && !process.env.APPROVAL_SECRET) ||
+       config.approvalSecret.length < 24 || !config.webhookSecret)) {
+    throw new Error("Non-loopback HTTP requires explicit APPROVAL_SECRET and WEBHOOK_SECRET");
+  }
+  for (const value of [config.maxWallMsPerRun, config.leaseTtlMs, config.deliveryTimeoutMs,
+    config.workerIdleMs, config.schedulerIntervalMs, config.dispatcherIntervalMs]) {
+    if (!Number.isSafeInteger(value) || value < 1 || value > 2_147_483_647) {
+      throw new Error("Runtime timeouts and intervals must be positive 32-bit integers");
+    }
+  }
+  return config;
 }

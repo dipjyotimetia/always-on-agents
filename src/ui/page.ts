@@ -288,7 +288,8 @@ function table(headers, rows) {
 }
 
 async function load() {
-  const res = await fetch('/api/dashboard');
+  if (!secret()) return;
+  const res = await fetch('/api/dashboard', { headers: { 'x-approval-secret': secret() } });
   if (!res.ok) throw new Error('dashboard ' + res.status);
   const data = await res.json();
   const m = data.metrics;
@@ -315,11 +316,13 @@ async function load() {
 
   const pendingApprovals = (data.deferred || []).filter(d => d.status === 'pending');
   document.getElementById('approvals').innerHTML = table(
-    ['Tool', 'Session', 'Expires', ''],
+    ['Tool', 'Session', 'Expires', 'Arguments', ''],
     pendingApprovals.map(d => [
       '<span class="mono">' + escapeHtml(d.tool_name) + '</span><div class="mono" style="color:var(--muted)">' + escapeHtml(d.id.slice(0,8)) + '</div>',
       '<span class="mono">' + escapeHtml(d.session_key || '') + '</span>',
       '<span class="mono">' + escapeHtml((d.expires_at || '').replace('T',' ').slice(0,19)) + '</span>',
+      '<details><summary>Review arguments</summary><pre style="white-space:pre-wrap">' +
+        escapeHtml(d.arguments_json || '') + '</pre></details>',
       '<button data-approve="' + escapeHtml(d.id) + '" type="button" class="primary">Approve</button> ' +
       '<button data-deny="' + escapeHtml(d.id) + '" type="button" class="danger">Deny</button>'
     ])
@@ -397,6 +400,7 @@ async function setStopped(stop) {
   await load();
 }
 
+secretInput.addEventListener('change', () => load().catch(e => flash(String(e), false)));
 document.getElementById('refreshBtn').onclick = () => load().catch(e => flash(String(e), false));
 document.getElementById('stopBtn').onclick = () => setStopped(true);
 document.getElementById('resumeBtn').onclick = () => setStopped(false);
@@ -407,7 +411,7 @@ document.getElementById('ingestBtn').onclick = async () => {
   if (!payload.sourceId) payload.sourceId = 'ui-' + Date.now();
   const res = await fetch('/events', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'x-approval-secret': secret() },
     body: JSON.stringify(payload),
   });
   const body = await res.json().catch(() => ({}));

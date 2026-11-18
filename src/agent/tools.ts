@@ -2,8 +2,6 @@ import { createHash } from "node:crypto";
 import type { Config } from "../config.js";
 import type { Db } from "../db.js";
 import {
-  alreadyReported,
-  appendReported,
   readMemoryFile,
   writeMemoryFile,
   type MemoryProvenance,
@@ -106,7 +104,8 @@ export const TOOL_DEFS: ToolDef[] = [
     inputSchema: objectSchema({
       action: {
         type: "string",
-        description: "Tool to run after approval. Defaults to send_external.",
+        enum: ["send_external", "proxied_request"],
+        description: "Action to execute after approval. Defaults to send_external.",
       },
       args: {
         type: "object",
@@ -152,11 +151,6 @@ export const TOOL_DEFS: ToolDef[] = [
         credential: {
           type: "string",
           description: "Named credential the proxy injects. Defaults to api.",
-        },
-        headers: {
-          type: "object",
-          description: "Extra request headers. Authorization is injected by the proxy.",
-          additionalProperties: { type: "string" },
         },
         body: { type: "string", description: "Optional request body." },
       },
@@ -206,14 +200,16 @@ function executeToolInner(ctx: ToolContext, call: ToolCall): ToolResult {
     case "write_memory": {
       const rel = String(call.arguments.path ?? "");
       const content = String(call.arguments.content ?? "");
-      const provenance = (String(
-        call.arguments.provenance ?? "agent",
-      ) || "agent") as MemoryProvenance;
+      const requested = call.arguments.provenance ?? "agent";
+      if (requested !== "agent" && requested !== "inferred_untrusted") {
+        return fail(call.id, "tool may only write agent or inferred_untrusted provenance");
+      }
+      const provenance: MemoryProvenance = requested;
       const risk = classifyRisk("write_memory", {
         path: rel,
         provenance,
       });
-      if (risk === "block") return fail(call.id, "blocked by classifier");
+      if (risk !== "allow") return fail(call.id, "memory write requires trusted authority");
       writeMemoryFile(ctx.config.memoryDir, rel, content, { provenance });
       return ok(call.id, `wrote ${rel} (provenance=${provenance})`);
     }
@@ -236,17 +232,19 @@ function executeToolInner(ctx: ToolContext, call: ToolCall): ToolResult {
     case "notify_user": {
       const text = String(call.arguments.text ?? "").trim();
       if (!text) return fail(call.id, "empty notification");
-      if (alreadyReported(ctx.config.memoryDir, text)) {
-        return ok(call.id, "suppressed: already reported");
-      }
       const hash = createHash("sha256").update(text).digest("hex").slice(0, 16);
+      const key = `notify:${ctx.sessionKey}:${hash}`;
+      const existing = ctx.db.prepare(
+        "SELECT status FROM outbox WHERE inbox_id = ? AND idempotency_key = ?",
+      ).get(ctx.inboxId, key);
+      if (existing) return ok(call.id, "suppressed: already in outbox");
       enqueueOutbox(ctx.db, {
         inboxId: ctx.inboxId,
+        channel: "notification",
         body: text,
         meta: { sessionKey: ctx.sessionKey },
-        idempotencyKey: `notify:${ctx.sessionKey}:${hash}`,
+        idempotencyKey: key,
       });
-      appendReported(ctx.config.memoryDir, text);
       return ok(call.id, "enqueued");
     }
     case "request_approval":
@@ -255,14 +253,22 @@ function executeToolInner(ctx: ToolContext, call: ToolCall): ToolResult {
         call.name === "proxied_request"
           ? "proxied_request"
           : String(call.arguments.action ?? "send_external");
-      const args =
-        call.name === "proxied_request"
-          ? call.arguments
-          : ((call.arguments.args as Record<string, unknown> | undefined) ??
-            (call.arguments as Record<string, unknown>));
-      const risk = classifyRisk(action, args);
-      if (risk === "block") {
-        return fail(call.id, "blocked by auto-mode classifier");
+      if (action !== "send_external" && action !== "proxied_request") {
+        return fail(call.id, "unsupported approval action");
+      }
+      const supplied = call.name === "proxied_request" ? call.arguments : call.arguments.args;
+      if (!supplied || typeof supplied !== "object" || Array.isArray(supplied)) {
+        return fail(call.id, "approval arguments must be an object");
+      }
+      const args = supplied as Record<string, unknown>;
+      if (action === "send_external" && (typeof args.to !== "string" || !args.to.trim() ||
+          typeof args.body !== "string" || !args.body.trim())) {
+        return fail(call.id, "send_external requires recipient and body");
+      }
+      if (action === "proxied_request" &&
+          (typeof args.url !== "string" || typeof (args.method ?? "POST") !== "string" ||
+           typeof (args.credential ?? "api") !== "string")) {
+        return fail(call.id, "proxy requires URL, method and credential name");
       }
       const deferred = createDeferredCall(ctx.db, {
         inboxId: ctx.inboxId,

@@ -6,7 +6,6 @@ import type {
   BrainOutput,
   TokenUsage,
   ToolCall,
-  ToolName,
 } from "./types.js";
 
 export type AnthropicBrainOptions = {
@@ -21,6 +20,7 @@ export type AnthropicMessagesClient = {
   messages: {
     create: (
       body: Anthropic.MessageCreateParamsNonStreaming,
+      options?: { signal?: AbortSignal },
     ) => Promise<Anthropic.Message>;
   };
 };
@@ -45,7 +45,7 @@ export function createAnthropicBrain(opts: AnthropicBrainOptions): Brain {
           description: tool.description,
           input_schema: tool.inputSchema,
         })),
-      });
+      }, input.signal ? { signal: input.signal } : undefined);
 
       const usage = anthropicUsage(response.usage);
       const toolCalls: ToolCall[] = [];
@@ -53,9 +53,11 @@ export function createAnthropicBrain(opts: AnthropicBrainOptions): Brain {
       for (const block of response.content) {
         if (block.type === "text") texts.push(block.text);
         if (block.type === "tool_use") {
+          const tool = input.tools.find((item) => item.name === block.name);
+          if (!tool) continue;
           toolCalls.push({
             id: block.id || randomUUID(),
-            name: block.name as ToolName,
+            name: tool.name,
             arguments: asRecord(block.input),
           });
         }
@@ -85,7 +87,7 @@ function createOfficialClient(opts: AnthropicBrainOptions): AnthropicMessagesCli
   });
   return {
     messages: {
-      create: (body) => sdk.messages.create(body),
+      create: (body, options) => sdk.messages.create(body, options),
     },
   };
 }

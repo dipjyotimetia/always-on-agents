@@ -9,10 +9,12 @@ export type CredentialStore = {
   label(name: string): string;
   /** Inject secret into a request builder; agent code must not call this. */
   withSecret<T>(name: string, fn: (secret: string) => T): T;
+  allows(name: string, url: URL, method: string): boolean;
 };
 
 export function createCredentialStore(
   initial: Record<string, string> = {},
+  policies: Readonly<Record<string, { url: string; methods: readonly string[] }>> = {},
 ): CredentialStore {
   const secrets = new Map<string, string>();
   for (const [k, v] of Object.entries(initial)) {
@@ -33,6 +35,15 @@ export function createCredentialStore(
     label(name) {
       return secrets.has(name) ? `[credential:${name}]` : `[missing:${name}]`;
     },
+    allows(name, url, method) {
+      if (!/^[a-zA-Z0-9_]+$/.test(name)) return false;
+      const policy = Object.hasOwn(policies, name) ? policies[name] : undefined;
+      const endpoint = policy?.url ?? process.env[`AOA_ENDPOINT_${name.toUpperCase()}`];
+      const methods = policy?.methods ??
+        (process.env[`AOA_METHODS_${name.toUpperCase()}`] ?? "GET").split(",");
+      return Boolean(endpoint && new URL(endpoint).href === url.href &&
+        methods.some((allowed) => allowed.trim().toUpperCase() === method));
+    },
     withSecret(name, fn) {
       const secret = secrets.get(name);
       if (!secret) throw new Error(`credential not configured: ${name}`);
@@ -43,7 +54,7 @@ export function createCredentialStore(
 
 /**
  * Build an authenticated fetch that injects Authorization outside the agent sandbox.
- * The agent only receives the response text — never the Authorization header value.
+ * Expose the response status without forwarding remote headers or content.
  */
 export async function proxiedFetch(
   store: CredentialStore,
@@ -51,20 +62,32 @@ export async function proxiedFetch(
     credential: string;
     url: string;
     method?: string;
-    headers?: Record<string, string>;
+    idempotencyKey: string;
+    signal: AbortSignal;
     body?: string;
   },
-): Promise<{ status: number; body: string }> {
+): Promise<{ status: number }> {
+  const url = new URL(opts.url);
+  const method = (opts.method ?? "POST").toUpperCase();
+  if (url.protocol !== "https:" || url.username || url.password || url.hash ||
+      !store.allows(opts.credential, url, method)) {
+    throw new Error("request outside credential policy");
+  }
+  opts.signal.throwIfAborted();
   return store.withSecret(opts.credential, async (secret) => {
-    const res = await fetch(opts.url, {
-      method: opts.method ?? "POST",
+    const res = await fetch(url, {
+      method,
+      redirect: "error",
+      signal: opts.signal,
       headers: {
-        ...(opts.headers ?? {}),
+        "content-type": "application/json",
+        "idempotency-key": opts.idempotencyKey,
         Authorization: `Bearer ${secret}`,
       },
       body: opts.body,
     });
-    const body = await res.text();
-    return { status: res.status, body: body.slice(0, 8_000) };
+    await res.body?.cancel();
+    if (!res.ok) throw new Error(`credential endpoint returned HTTP ${res.status}`);
+    return { status: res.status };
   });
 }

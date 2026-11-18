@@ -5,29 +5,28 @@
   "type": "module",
   "license": "MIT",
   "engines": {
-    "node": ">=22"
+    "bun": ">=1.4.4"
   },
   "bin": {
     "always-on": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node --experimental-sqlite dist/cli.js",
-    "dev": "node --experimental-sqlite --import tsx src/cli.ts",
-    "test": "node --experimental-sqlite ./node_modules/vitest/vitest.mjs run",
-    "test:watch": "node --experimental-sqlite ./node_modules/vitest/vitest.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "start": "bun dist/cli.js",
+    "dev": "bun src/cli.ts",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "typecheck": "tsc -p tsconfig.test.json"
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
-    "tsx": "^4.20.6",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.8"
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "@types/bun": "^1.4.4"
   },
-  "packageManager": "pnpm@10.33.4",
+  "packageManager": "bun@1.4.4",
   "dependencies": {
-    "@anthropic-ai/sdk": "^1.8.0",
-    "@google/genai": "^3.3.0",
-    "openai": "^7.57.0"
+    "@anthropic-ai/sdk": "^1.10.0",
+    "@google/genai": "^3.6.0",
+    "openai": "^7.59.0"
   }
 }

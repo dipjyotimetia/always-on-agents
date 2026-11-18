@@ -11,7 +11,6 @@ import type {
   BrainInput,
   BrainOutput,
   ToolCall,
-  ToolName,
 } from "./types.js";
 
 export type GeminiBrainOptions = {
@@ -52,6 +51,7 @@ export function createGeminiBrain(opts: GeminiBrainOptions): Brain {
         contents: toGeminiContents(input.messages),
         config: {
           ...(systemInstruction ? { systemInstruction } : {}),
+          abortSignal: input.signal,
           automaticFunctionCalling: { disable: true },
           tools: [
             {
@@ -71,11 +71,12 @@ export function createGeminiBrain(opts: GeminiBrainOptions): Brain {
       };
       const calls = response.functionCalls ?? [];
       const toolCalls: ToolCall[] = calls.flatMap((call) => {
-        if (!call.name) return [];
+        const tool = input.tools.find((item) => item.name === call.name);
+        if (!tool) return [];
         return [
           {
             id: call.id || randomUUID(),
-            name: call.name as ToolName,
+            name: tool.name,
             arguments: asRecord(call.args),
           },
         ];

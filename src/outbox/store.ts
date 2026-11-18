@@ -27,19 +27,10 @@ export function enqueueOutbox(
 ): OutboxMessage {
   const inboxId = opts.inboxId ?? "default";
   const key = opts.idempotencyKey ?? null;
-  if (key) {
-    const existing = db
-      .prepare(
-        `SELECT * FROM outbox WHERE inbox_id = ? AND idempotency_key = ?`,
-      )
-      .get(inboxId, key) as OutboxMessage | undefined;
-    if (existing) return existing;
-  }
-
   const result = db
     .prepare(
       `INSERT INTO outbox (inbox_id, channel, body, meta, idempotency_key)
-       VALUES (?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?) ON CONFLICT(inbox_id, idempotency_key) DO NOTHING`,
     )
     .run(
       inboxId,
@@ -48,6 +39,11 @@ export function enqueueOutbox(
       JSON.stringify(opts.meta ?? {}),
       key,
     );
+  if (result.changes === 0) {
+    return db.query<OutboxMessage, [string, string | null]>(
+      "SELECT * FROM outbox WHERE inbox_id = ? AND idempotency_key = ?",
+    ).get(inboxId, key)!;
+  }
   return db
     .prepare(`SELECT * FROM outbox WHERE id = ?`)
     .get(Number(result.lastInsertRowid)) as OutboxMessage;
@@ -58,7 +54,9 @@ export function claimPendingOutbox(db: Db, limit = 20): OutboxMessage[] {
   return withTransaction(db, () => {
     const pending = db
       .prepare(
-        `SELECT * FROM outbox WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?`,
+        `SELECT * FROM outbox WHERE status = 'pending'
+         AND (attempts = 0 OR julianday(updated_at) + (1 << MIN(attempts, 8)) / 86400.0 <= julianday('now'))
+         ORDER BY id ASC LIMIT ?`,
       )
       .all(limit) as OutboxMessage[];
     if (pending.length === 0) return [];
@@ -84,50 +82,37 @@ export function reclaimStaleSending(db: Db, olderThanMs = 60_000): number {
   const result = db
     .prepare(
       `UPDATE outbox
-       SET status = 'pending', updated_at = ?
+       SET status = CASE WHEN attempts >= 5 THEN 'failed' ELSE 'pending' END, updated_at = ?
        WHERE status = 'sending' AND updated_at < ?`,
     )
     .run(nowIso(), cutoff);
   return Number(result.changes);
 }
 
-export function markOutboxSent(db: Db, id: number): void {
-  db.prepare(
-    `UPDATE outbox SET status = 'sent', sent_at = ? WHERE id = ?`,
-  ).run(nowIso(), id);
-}
-
-export function markOutboxSuppressed(db: Db, id: number, reason: string): void {
-  const row = db.prepare(`SELECT meta FROM outbox WHERE id = ?`).get(id) as
-    | { meta: string }
-    | undefined;
-  const meta = safeMeta(row?.meta);
-  meta.suppressReason = reason;
-  db.prepare(
-    `UPDATE outbox SET status = 'suppressed', meta = ? WHERE id = ?`,
-  ).run(JSON.stringify(meta), id);
-}
-
-export function markOutboxFailed(db: Db, id: number, error: string): void {
-  const row = db.prepare(`SELECT meta, attempts FROM outbox WHERE id = ?`).get(id) as
-    | { meta: string; attempts: number }
-    | undefined;
-  const meta = safeMeta(row?.meta);
-  meta.error = error;
-  const attempts = row?.attempts ?? 1;
-  // Retry a few times then leave failed
-  const status = attempts >= 5 ? "failed" : "pending";
-  db.prepare(`UPDATE outbox SET status = ?, meta = ? WHERE id = ?`).run(
-    status,
-    JSON.stringify(meta),
-    id,
-  );
-}
-
-function safeMeta(raw: string | undefined): Record<string, unknown> {
+export function finishOutboxAttempt(
+  db: Db,
+  row: OutboxMessage,
+  result: { type: "sent" } | { type: "suppressed"; reason: string } | { type: "failed"; reason: string },
+): boolean {
+  const now = nowIso();
+  const status = result.type === "failed" && row.attempts < 5 ? "pending" : result.type;
+  let meta: unknown;
   try {
-    return JSON.parse(raw ?? "{}") as Record<string, unknown>;
+    meta = JSON.parse(row.meta);
   } catch {
-    return {};
+    meta = {};
   }
+  const updated = db.prepare(
+    `UPDATE outbox SET status = ?, updated_at = ?, sent_at = ?, meta = ?
+     WHERE id = ? AND status = 'sending' AND attempts = ? AND updated_at = ?`,
+  ).run(status, now, result.type === "sent" ? now : null,
+    result.type === "sent" ? row.meta : JSON.stringify({ ...asObject(meta), error: result.reason }),
+    row.id, row.attempts, row.updated_at);
+  return updated.changes === 1;
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }

@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import type { Config } from "../config.js";
 import type { Db } from "../db.js";
 import { isStopped } from "../stop.js";
@@ -25,11 +26,8 @@ export async function runScheduler(opts: {
 
   while (!opts.signal?.aborted) {
     total += tick();
-    await sleep(opts.config.schedulerIntervalMs);
+    await delay(opts.config.schedulerIntervalMs, undefined, { signal: opts.signal })
+      .catch((error: unknown) => { if (!opts.signal?.aborted) throw error; });
   }
   return total;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
