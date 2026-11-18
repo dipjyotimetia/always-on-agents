@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { insertEvent, claimPendingBatch, markEventsFailed } from "../src/inbox/store.js";
 import { createFollowup, fireDueTimers } from "../src/timers/store.js";
@@ -26,6 +26,7 @@ beforeEach(() => {
   runtime = createRuntime({
     config: {
       dataDir: dir,
+      brain: "mock",
       minFollowupSeconds: 0,
       workerIdleMs: 10,
       schedulerIntervalMs: 10,
@@ -92,7 +93,7 @@ describe("always-on architecture acceptance", () => {
       .prepare(`UPDATE events SET status = 'running', attempts = 1 WHERE id = ?`)
       .run(event!.id);
     markEventsFailed(runtime.db, [event!.id], "boom");
-    let row = runtime.db
+    const row = runtime.db
       .prepare(`SELECT status, attempts FROM events WHERE id = ?`)
       .get(event!.id) as { status: string; attempts: number };
     expect(row.status).toBe("pending");
@@ -103,10 +104,10 @@ describe("always-on architecture acceptance", () => {
       )
       .run(event!.id);
     markEventsFailed(runtime.db, [event!.id], "boom again");
-    row = runtime.db
-      .prepare(`SELECT status FROM events WHERE id = ?`)
-      .get(event!.id) as { status: string };
-    expect(row.status).toBe("dead");
+    const dead = runtime.db.query<{ status: string }, [number]>(
+      "SELECT status FROM events WHERE id = ?",
+    ).get(event!.id);
+    expect(dead?.status).toBe("dead");
   });
 
   it("follow-up timer becomes an inbox event then a run", async () => {
@@ -188,6 +189,38 @@ describe("always-on architecture acceptance", () => {
     expect(outcome.outcome).toBe("executed_approval");
   });
 
+  it("preserves history and processes an event batched with an approval", async () => {
+    const sessionKey = "approval-resume";
+    insertEvent(runtime.db, { source: "user", sourceId: "request", sessionKey,
+      payload: { text: "please email anyone" } });
+    await runtime.runOnce();
+    const call = runtime.db.prepare("SELECT id FROM deferred_calls").get() as { id: string };
+    resolveDeferredCall(runtime.db, { id: call.id, decision: "approved" });
+    insertEvent(runtime.db, { source: "approval", sourceId: "decision", sessionKey,
+      payload: { decision: "approved", deferredId: call.id } });
+    insertEvent(runtime.db, { source: "user", sourceId: "next", sessionKey,
+      payload: { text: "independent message" } });
+    await runtime.runOnce();
+    const session = runtime.db.prepare("SELECT transcript_json FROM sessions WHERE session_key = ?")
+      .get(sessionKey) as { transcript_json: string };
+    expect(session.transcript_json).toContain("please email anyone");
+    expect(session.transcript_json).toContain("independent message");
+  });
+
+  it("compacts complete tool exchanges", () => {
+    const compacted = compactMessages([
+      { role: "user", content: "initial" },
+      { role: "assistant", content: "", toolCalls: [{ id: "a", name: "read_memory", arguments: {} }] },
+      { role: "tool", toolCallId: "a", content: "result" },
+      { role: "assistant", content: "done" },
+    ], 3, 2);
+    for (const message of compacted) {
+      if (message.role !== "tool") continue;
+      expect(compacted.some((entry) => entry.role === "assistant" &&
+        entry.toolCalls?.some((call) => call.id === message.toolCallId))).toBe(true);
+    }
+  });
+
   it("records silence for duplicate / non-actionable content", async () => {
     insertEvent(runtime.db, {
       source: "news",
@@ -256,6 +289,7 @@ describe("always-on architecture acceptance", () => {
     runtime = createRuntime({
       config: {
         dataDir: dir,
+      brain: "mock",
         webhookSecret: secret,
         minFollowupSeconds: 0,
       },
@@ -346,6 +380,7 @@ describe("always-on architecture acceptance", () => {
     runtime = cr({
       config: {
         dataDir: dir,
+      brain: "mock",
         minFollowupSeconds: 0,
         autoNotifyBareText: false,
       },
@@ -419,7 +454,11 @@ describe("always-on architecture acceptance", () => {
       sourceId: "dash-1",
       payload: { text: "dashboard" },
     });
-    const dash = await fetch(`${base}/api/dashboard`);
+    const rejected = await fetch(`${base}/api/dashboard`);
+    expect(rejected.status).toBe(401);
+    const dash = await fetch(`${base}/api/dashboard`, {
+      headers: { "x-approval-secret": runtime.config.approvalSecret },
+    });
     expect(dash.status).toBe(200);
     const body = (await dash.json()) as {
       metrics: { events: Record<string, number> };

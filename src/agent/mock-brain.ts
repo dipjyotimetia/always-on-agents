@@ -11,6 +11,8 @@ export function createMockBrain(): Brain {
       const lastUser = [...input.messages].reverse().find((m) => m.role === "user");
       const text = lastUser && lastUser.role === "user" ? lastUser.content : "";
 
+      if (input.messages.some((message) => message.role === "system" && message.content.startsWith("You are") && message.content.includes("An operator decision and action result are present."))) return { type: "message", content: "" };
+
       if (/duplicate|already reported|nothing to send/i.test(text)) {
         return {
           type: "tool_calls",

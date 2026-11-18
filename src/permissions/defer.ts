@@ -59,24 +59,24 @@ export function getDeferredCall(db: Db, id: string): DeferredCall | null {
   );
 }
 
+export class ApprovalConflict extends Error {}
+
 export function resolveDeferredCall(
   db: Db,
   opts: { id: string; decision: "approved" | "denied" },
 ): DeferredCall {
   const row = getDeferredCall(db, opts.id);
-  if (!row) throw new Error(`unknown deferred call: ${opts.id}`);
-  if (row.status !== "pending") {
-    throw new Error(`deferred call ${opts.id} already ${row.status}`);
+  if (!row) throw new ApprovalConflict("unknown deferred call");
+  if (row.status === opts.decision ||
+      (opts.decision === "approved" && (row.status === "executed" || row.status === "failed"))) {
+    return row;
   }
-  if (new Date(row.expires_at).getTime() <= Date.now()) {
-    db.prepare(
-      `UPDATE deferred_calls SET status = 'expired', resolved_at = ? WHERE id = ?`,
-    ).run(nowIso(), opts.id);
-    throw new Error(`deferred call ${opts.id} expired`);
-  }
-  db.prepare(
-    `UPDATE deferred_calls SET status = ?, resolved_at = ? WHERE id = ?`,
-  ).run(opts.decision, nowIso(), opts.id);
+  const now = nowIso();
+  const result = db.prepare(
+    `UPDATE deferred_calls SET status = ?, resolved_at = ?
+     WHERE id = ? AND status = 'pending' AND expires_at > ?`,
+  ).run(opts.decision, now, opts.id, now);
+  if (result.changes !== 1) throw new ApprovalConflict("deferred call is no longer pending");
   return getDeferredCall(db, opts.id)!;
 }
 

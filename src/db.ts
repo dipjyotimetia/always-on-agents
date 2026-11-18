@@ -1,6 +1,8 @@
-import { DatabaseSync } from "node:sqlite";
+import { randomUUID } from "node:crypto";
+import { Database } from "bun:sqlite";
 
 const SCHEMA = `
+PRAGMA busy_timeout = 5000;
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -47,6 +49,12 @@ CREATE TABLE IF NOT EXISTS timers (
 CREATE INDEX IF NOT EXISTS idx_timers_due
   ON timers (status, due_at);
 
+CREATE TABLE IF NOT EXISTS routines (
+  name TEXT PRIMARY KEY,
+  instruction TEXT NOT NULL,
+  timer_id INTEGER NOT NULL UNIQUE REFERENCES timers(id)
+);
+
 CREATE TABLE IF NOT EXISTS outbox (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   inbox_id TEXT NOT NULL DEFAULT 'default',
@@ -87,6 +95,10 @@ CREATE TABLE IF NOT EXISTS deferred_calls (
   resolved_at TEXT,
   executed_at TEXT,
   result_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS deferred_execution_attempts (
+  deferred_id TEXT PRIMARY KEY REFERENCES deferred_calls(id)
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -133,15 +145,17 @@ CREATE TABLE IF NOT EXISTS rate_limits (
 );
 `;
 
-export type Db = DatabaseSync;
+export type Db = Database;
 
 export function openDb(dbPath: string): Db {
-  const db = new DatabaseSync(dbPath);
+  const db = new Database(dbPath, { strict: true });
   db.exec(SCHEMA);
   db.prepare(
-    `INSERT INTO schema_meta (key, value) VALUES ('version', '2')
+    `INSERT INTO schema_meta (key, value) VALUES ('version', '3')
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
   ).run();
+  db.prepare("INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('instance_id', ?)")
+    .run(randomUUID());
   return db;
 }
 
@@ -151,17 +165,5 @@ export function nowIso(): string {
 
 /** Run fn inside an IMMEDIATE transaction. */
 export function withTransaction<T>(db: Db, fn: () => T): T {
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    const result = fn();
-    db.exec("COMMIT");
-    return result;
-  } catch (err) {
-    try {
-      db.exec("ROLLBACK");
-    } catch {
-      // ignore
-    }
-    throw err;
-  }
+  return db.transaction(fn).immediate();
 }
